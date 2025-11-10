@@ -24,6 +24,7 @@ add_library(lazymc STATIC
   src/lazymc.cpp
   src/NeighborSearch.cpp
   src/Systematic_search.cpp
+  src/graph_processing.cpp
 )
 
 # ---- CLI ----
@@ -55,4 +56,3 @@ if(BUILD_TESTING)
     message(WARNING "GTest not found in system. Tests are disabled.")
   endif()
 endif()
-target_sources(lazymc PRIVATE src/graph_processing.cpp)
