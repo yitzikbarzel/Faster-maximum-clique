@@ -1,38 +1,56 @@
-# Requires CMake version 3.14 or later for FetchContent
-cmake_minimum_required(VERSION 3.14)
-project(MyCliqueBenchmark LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.20)
+project(LazyMC LANGUAGES CXX)
 
-# 1. Define the main executable (we’ll call it my_benchmark_runner)
-add_executable(my_benchmark_runner main.cpp)
+# ---- Options ----
+option(BUILD_TESTING "Build tests" OFF)
 
-# 2. Load the FetchContent module
-include(FetchContent)
-
-# 3. Declare the dependency (MaxCliqueDyn)
-# GitLab URL: https://gitlab.com/janezkonc/mcqd.git [4]
-FetchContent_Declare(
-    mcqd
-    GIT_REPOSITORY https://gitlab.com/janezkonc/mcqd.git
-    GIT_TAG        9ab9717cf7d1be1a85b165a8eacb71b9e5831113
-)
-
-# 4. Download the source code into the build directory (Populate)
-FetchContent_GetProperties(mcqd)
-if(NOT mcqd_POPULATED)
-    FetchContent_Populate(mcqd)
+# ---- Toolchain ----
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(MSVC)
+  add_compile_options(/W4 /permissive-)
+else()
+  add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# 5. Create a static library target for MCQD
-# MCQD does not contain a CMakeLists.txt, therefore we manually create a (wrapper) target
-# that links to the mcqd.cpp source file that was downloaded.
-add_library(mcqd_lib STATIC
-    ${mcqd_SOURCE_DIR}/mcqd.cpp
+# ---- Library (include ALL sources here) ----
+add_library(lazymc STATIC
+  src/bk.cpp
+  src/corness_based_heuristic.cpp
+  src/degree_based_heuristic.cpp
+  src/intersect_functions.cpp
+  src/k-VertexCover.cpp
+  src/lazygraph.cpp
+  src/lazymc.cpp
+  src/NeighborSearch.cpp
+  src/Systematic_search.cpp
+  src/graph_processing.cpp     # ? inside the library list (fix for Greptile finding)
 )
 
-# 6. Set the include directory
-target_include_directories(mcqd_lib PUBLIC
-    ${mcqd_SOURCE_DIR}
-)
+# ---- CLI ----
+add_executable(lazymc_cli src/main.cpp)
+target_link_libraries(lazymc_cli PRIVATE lazymc)
 
-# 7. Link the library to the main executable
-target_link_libraries(my_benchmark_runner PRIVATE mcqd_lib)
+# ---- Tests (system GTest; no hard-coded Windows paths) ----
+if(BUILD_TESTING)
+  include(CTest)
+  enable_testing()
+
+  # Try config-mode first (MSYS2, vcpkg, Conan, etc.)
+  find_package(GTest CONFIG QUIET)
+  if(GTest_FOUND)
+    add_executable(unit_tests
+      tests/test_smoke.cpp
+      tests/test_intersect_functions.cpp
+      tests/test_bk.cpp
+      tests/test_graph_processing.cpp
+    )
+    target_link_libraries(unit_tests PRIVATE
+      lazymc
+      GTest::gtest GTest::gtest_main
+    )
+    add_test(NAME unit_tests COMMAND unit_tests)
+  else()
+    message(WARNING "GTest not found via CONFIG. Provide CMAKE_PREFIX_PATH or install system GTest. Tests disabled.")
+  endif()
+endif()

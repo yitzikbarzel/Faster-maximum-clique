@@ -27,17 +27,20 @@ add_library(lazymc STATIC
   src/graph_processing.cpp
 )
 
+# <<< Include directories >>>
+target_include_directories(lazymc
+  PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 # ---- CLI ----
 add_executable(lazymc_cli src/main.cpp)
 target_link_libraries(lazymc_cli PRIVATE lazymc)
 
-# ---- Tests (use system-installed GTest; no downloads) ----
 if(BUILD_TESTING)
   include(CTest)
   enable_testing()
 
-  # Try to find GTest installed by MSYS2 (pacman).
-  # CMAKE_PREFIX_PATH helps CMake find it under C:\msys64\mingw64
   if(NOT DEFINED CMAKE_PREFIX_PATH)
     set(CMAKE_PREFIX_PATH "C:/msys64/mingw64")
   endif()
@@ -46,10 +49,18 @@ if(BUILD_TESTING)
   if(GTest_FOUND)
     add_executable(unit_tests
       tests/test_smoke.cpp
+      tests/test_graph_processing.cpp
     )
+
+    
+    target_include_directories(unit_tests PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+
     target_link_libraries(unit_tests PRIVATE
       lazymc
-      GTest::gtest GTest::gtest_main
+      GTest::gtest
+      GTest::gtest_main
     )
     add_test(NAME unit_tests COMMAND unit_tests)
   else()

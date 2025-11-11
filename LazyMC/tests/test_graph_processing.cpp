@@ -1,30 +1,38 @@
 #include <gtest/gtest.h>
+#include "lazymc/graph_processing.h"
+#include <map>
+#include <utility>
 #include <vector>
-#include <cstdint>
 
-namespace lazymc {
-// Forward declarations to match current implementation (no headers yet)
-int graph_processing_init();
-std::vector<int32_t> graph_processing_run(
-    const std::vector<std::vector<int32_t>>& G);
-} // namespace lazymc
-
-// Active smoke test: init should succeed
-TEST(GraphProcessing, InitReturnsZero) {
-  // Expect init to succeed (placeholder behavior)
-  EXPECT_EQ(lazymc::graph_processing_init(), 0);
+TEST(AdjacencyListTest, EmptyGraph) {
+    std::vector<std::pair<int, int>> edges = {};
+    std::map<int, std::vector<int>> result = graph_processing(edges);
+    EXPECT_TRUE(result.empty());
 }
 
-// Disabled until real logic is implemented
-TEST(GraphProcessing, DISABLED_RunOnTinyGraph) {
-  // Simple 3-clique graph
-  std::vector<std::vector<int32_t>> G = {
-    {1,2},     // 0
-    {0,2},     // 1
-    {0,1}      // 2
-  };
-  auto out = lazymc::graph_processing_run(G);
-  // TODO: Replace with real expectations once implemented
-  // EXPECT_FALSE(out.empty());
-  (void)out;
+TEST(AdjacencyListTest, TwoEdgesFromSameNode_Undirected) {
+    std::vector<std::pair<int, int>> edges = {{5, 8}, {5, 3}};
+    std::map<int, std::vector<int>> result = graph_processing(edges);
+
+    EXPECT_EQ((std::vector<int>{3, 8}), result[5]); // סוגריים כפולים בגלל המאקרו
+    EXPECT_EQ((std::vector<int>{5}),     result[8]);
+    EXPECT_EQ((std::vector<int>{5}),     result[3]);
+}
+
+TEST(AdjacencyListTest, DuplicateEdges_Undirected) {
+    std::vector<std::pair<int, int>> edges = {{1, 2}, {1, 2}};
+    std::map<int, std::vector<int>> result = graph_processing(edges);
+
+    EXPECT_EQ((std::vector<int>{2}), result[1]);
+    EXPECT_EQ((std::vector<int>{1}), result[2]);
+}
+
+TEST(AdjacencyListTest, SelfLoop_Ignored) {
+    std::vector<std::pair<int, int>> edges = {{4, 4}};
+    std::map<int, std::vector<int>> result = graph_processing(edges);
+
+    if (result.count(4))
+        EXPECT_TRUE(result[4].empty());
+    else
+        SUCCEED();
 }
