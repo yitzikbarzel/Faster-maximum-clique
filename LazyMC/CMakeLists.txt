@@ -50,7 +50,17 @@ if(BUILD_TESTING)
     add_executable(unit_tests
       tests/test_smoke.cpp
       tests/test_graph_processing.cpp
+      tests/test_bk.cpp
     )
+    add_executable(bk_bench
+  src/bk_bench.cpp
+)
+
+target_link_libraries(bk_bench
+  PRIVATE
+    lazymc
+)
+
 
     
     target_include_directories(unit_tests PRIVATE
