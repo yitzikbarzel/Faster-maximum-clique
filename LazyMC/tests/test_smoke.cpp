@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-// Disabled placeholder test – keeps build green until real tests exist
-TEST(Smoke, DISABLED_Placeholder) {
-  EXPECT_TRUE(true);
+// Simple smoke test to verify GoogleTest integration
+TEST(SmokeTest, BasicAssertion) {
+    EXPECT_EQ(1 + 1, 2);
 }

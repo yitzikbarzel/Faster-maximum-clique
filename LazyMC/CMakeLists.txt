@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(LazyMC LANGUAGES CXX)
 
 # ---- Options ----
-option(BUILD_TESTING "Build tests" OFF)
+option(BUILD_TESTING "Build tests" ON)
 
 # ---- Toolchain ----
 set(CMAKE_CXX_STANDARD 17)
@@ -19,7 +19,7 @@ add_library(lazymc STATIC
   src/corness_based_heuristic.cpp
   src/degree_based_heuristic.cpp
   src/intersect_functions.cpp
-  src/k-VertexCover.cpp
+  src/k_vertex_cover.cpp
   src/lazygraph.cpp
   src/lazymc.cpp
   src/NeighborSearch.cpp
@@ -27,7 +27,6 @@ add_library(lazymc STATIC
   src/graph_processing.cpp
 )
 
-# <<< Include directories >>>
 target_include_directories(lazymc
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -37,43 +36,30 @@ target_include_directories(lazymc
 add_executable(lazymc_cli src/main.cpp)
 target_link_libraries(lazymc_cli PRIVATE lazymc)
 
+# ---- Benchmarks ----
+add_executable(bk_bench src/bk_bench.cpp)
+target_link_libraries(bk_bench PRIVATE lazymc)
+
+# ---- Testing (GoogleTest via FetchContent) ----
 if(BUILD_TESTING)
   include(CTest)
   enable_testing()
 
-  if(NOT DEFINED CMAKE_PREFIX_PATH)
-    set(CMAKE_PREFIX_PATH "C:/msys64/mingw64")
-  endif()
+  include(FetchContent)
 
-  find_package(GTest CONFIG QUIET)
-  if(GTest_FOUND)
-    add_executable(unit_tests
-      tests/test_smoke.cpp
-      tests/test_graph_processing.cpp
-      tests/test_bk.cpp
-    )
-    add_executable(bk_bench
-  src/bk_bench.cpp
-)
+  # Declare GoogleTest as an external dependency (download at configure time)
+  FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.15.2  # use a stable release tag
+  )
 
-target_link_libraries(bk_bench
-  PRIVATE
-    lazymc
-)
+  # On Windows, make sure we use the same runtime library
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
+  # Download and add GoogleTest targets (GTest::gtest, GTest::gtest_main, etc.)
+  FetchContent_MakeAvailable(googletest)
 
-    
-    target_include_directories(unit_tests PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
-
-    target_link_libraries(unit_tests PRIVATE
-      lazymc
-      GTest::gtest
-      GTest::gtest_main
-    )
-    add_test(NAME unit_tests COMMAND unit_tests)
-  else()
-    message(WARNING "GTest not found in system. Tests are disabled.")
-  endif()
+  # Tests are defined in the tests/ subdirectory
+  add_subdirectory(tests)
 endif()
