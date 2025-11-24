@@ -2,21 +2,24 @@
 
 #include <cstdint>
 #include <vector>
-// Adjacency list representation for an undirected graph.
-// Vertices are numbered 0..n-1.
-// For each vertex v, G[v] contains the neighbors of v.
+
 namespace lazymc {
+
+// Simple adjacency list: G[v] = neighbors of v
 using AdjList = std::vector<std::vector<int32_t>>;
 
-// Result object returned by the k-Vertex-Cover solver.
-// If 'found' is false, no vertex cover of size <= k exists.
-// If 'found' is true, 'cover' contains a valid vertex cover.
-
+// Result struct for k-Vertex-Cover.
 struct k_vertex_cover_res {
-  bool found = false;
-  std::vector<int32_t> cover;
+    bool found = false;               // true if a cover of size <= k exists
+    bool aborted = false;             // true if search stopped due to step limit
+    std::vector<int32_t> cover;       // vertices in the found cover (indices)
 };
 
-k_vertex_cover_res
-k_vertex_cover_adj(const AdjList& G, int32_t k);
-}
+// Solve k-Vertex-Cover on an adjacency-list graph.
+// Returns:
+//   - found = true  => cover.size() <= k, and "cover" contains such a cover
+//   - found = false && aborted = false  => הוכיח שאין cover בגודל <= k
+//   - found = false && aborted = true   => החיפוש הופסק בגלל מגבלת צעדים
+k_vertex_cover_res k_vertex_cover_adj(const AdjList& G, int32_t k);
+
+} // namespace lazymc
