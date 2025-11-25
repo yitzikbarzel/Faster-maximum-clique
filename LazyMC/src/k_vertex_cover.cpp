@@ -9,9 +9,7 @@ namespace {
 
 using lazymc::AdjList;
 
-// כמה צעדֵי רקורסיה מותר לפני שמפסיקים (תוכל לשנות לפי הצורך)
-constexpr long long VC_STEP_LIMIT = 20'000'000; // 20 מיליון
-
+constexpr long long VC_STEP_LIMIT = 20'000'000; 
 // Internal state for recursion.
 struct VCState {
     const AdjList* G = nullptr;              // pointer to original graph

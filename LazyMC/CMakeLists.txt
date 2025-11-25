@@ -37,8 +37,12 @@ add_executable(lazymc_cli src/main.cpp)
 target_link_libraries(lazymc_cli PRIVATE lazymc)
 
 # ---- Benchmarks ----
-add_executable(bk_bench src/bk_bench.cpp)
-target_link_libraries(bk_bench PRIVATE lazymc)
+add_executable(bk_cli src/bk_cli.cpp)
+target_link_libraries(bk_cli PRIVATE lazymc)
+
+# ---- Vertex Cover CLI ----
+add_executable(vc_cli src/vc_cli.cpp)
+target_link_libraries(vc_cli PRIVATE lazymc)
 
 # ---- Testing (GoogleTest via FetchContent) ----
 if(BUILD_TESTING)
