@@ -23,18 +23,18 @@ void NeighborSearch(const std::vector<std::vector<int32_t>> &G,
     // filter 2
     std::vector<int32_t> tempN;
     for (int32_t u : N){
-      if (intersect_size_gt_bool(const std::vector<int32_t>& neighbors_of_u,
-        const std::vector<int32_t>& N , best_clique_size -2))
-      tempN.push_back(u);
+      if (intersect_size_gt_bool(G[u], N, best_clique_size - 2)) {
+    tempN.push_back(u);
+    }
+
     }
     N = tempN;
     if (N.size() < best_clique_size) return;
     // filter 3
-    int32_t count_edge = 0;
+    int64_t count_edge = 0;
     std::vector<int32_t> tempN2;
     for (int32_t u : N){
-     int32_t d = intersect_size_gt_val(const std::vector<int32_t>& neighbors_of_u,
-        const std::vector<int32_t>& N , best_clique_size -2);
+     int32_t d = intersect_size_gt_val(G[u], N, best_clique_size - 2);
       if (d > best_clique_size - 2) tempN2.push_back(u);
       count_edge += d;
     }
