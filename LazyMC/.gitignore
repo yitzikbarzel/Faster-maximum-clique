@@ -1,4 +1,9 @@
 # Build artifacts
+
+LazyMC/build/
+
+build/
+*.exe
 /build/
 /out/
 /bin/
