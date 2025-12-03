@@ -5,6 +5,8 @@ add_executable(lazymc_tests
   test_graph_processing.cpp
   test_bk.cpp
   test_NeighborSearch.cpp
+  test_k_vertex_cover.cpp
+  test_degree_heuristic.cpp
 )
 
 target_link_libraries(lazymc_tests
@@ -15,5 +17,3 @@ target_link_libraries(lazymc_tests
 
 include(GoogleTest)
 gtest_discover_tests(lazymc_tests)
-
-

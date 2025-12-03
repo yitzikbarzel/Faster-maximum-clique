@@ -1,0 +1,30 @@
+name: CMake on self-hosted (Linux)
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+    branches: ['main']
+
+jobs:
+  build:
+    runs-on: [self-hosted, Linux]
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Configure CMake (Linux self-hosted)
+        working-directory: LazyMC
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=ON
+
+      - name: Build
+        working-directory: LazyMC
+        run: cmake --build build
+
+      - name: Run tests (ctest)
+        working-directory: LazyMC
+        run: ctest --test-dir build

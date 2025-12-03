@@ -13,6 +13,29 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# ---- External: MCQD (for baseline max-clique) ----
+include(FetchContent)
+
+FetchContent_Declare(
+  mcqd
+  GIT_REPOSITORY https://gitlab.com/janezkonc/mcqd.git
+  GIT_TAG        9ab9717cf7d1be1a85b165a8eacb71b9e5831113
+)
+
+FetchContent_GetProperties(mcqd)
+if(NOT mcqd_POPULATED)
+  FetchContent_Populate(mcqd)
+endif()
+
+add_library(mcqd_lib STATIC
+  ${mcqd_SOURCE_DIR}/mcqd.cpp
+)
+
+target_include_directories(mcqd_lib
+  PUBLIC
+    ${mcqd_SOURCE_DIR}
+)
+
 # ---- Library ----
 add_library(lazymc STATIC
   src/bk.cpp
@@ -38,8 +61,13 @@ add_executable(lazymc_cli src/main.cpp)
 target_link_libraries(lazymc_cli PRIVATE lazymc)
 
 # ---- Benchmarks ----
-add_executable(bk_bench src/bk_bench.cpp)
-target_link_libraries(bk_bench PRIVATE lazymc)
+add_executable(bk_cli src/bk_cli.cpp)
+target_link_libraries(bk_cli PRIVATE lazymc)
+
+# ---- Vertex Cover CLI ----
+add_executable(vc_cli src/vc_cli.cpp)
+target_link_libraries(vc_cli PRIVATE lazymc)
+
 
 # ---- Testing (GoogleTest via FetchContent) ----
 if(BUILD_TESTING)

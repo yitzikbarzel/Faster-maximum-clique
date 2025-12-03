@@ -1,12 +1,16 @@
-#include <vector>
+#include "lazymc/k_vertex_cover.h"
 #include <cstdint>
+#include <vector>
+
+namespace {
+  
+
+//“Here we need two functions that will adapt both the Bron–Kerbosch algorithm
+// and the k-VC algorithm to our existing graph representation.
+
+}
 namespace lazymc {
-// std::vector<int32_t> neighbor_search_right(const std::vector<int32_t>& N,
-//                                            const std::vector<std::vector<int32_t>>& /*G*/) {
-//   // TODO: Implement right-neighborhood filtering
-//   (void)N; // silence unused warning
-//   return {};
-// }
+
 void NeighborSearch(const std::vector<std::vector<int32_t>> &G,
    int32_t v, const std::vector<int32_t> &core,const std::vector<int32_t> &reorder,
     int32_t &best_clique_size, double phi){
@@ -41,13 +45,13 @@ void NeighborSearch(const std::vector<std::vector<int32_t>> &G,
     N = tempN2;
     if (N.size() < best_clique_size) return;
 
-    // if (count_edge/ N.size() * N.size()-1 > phi){
-    //   k_vertex_Cover(G[N],N + 1 − |C∗|)
-    // }else{
-    //   MaximumCliqueSearch(G[N],{v})
-    // }
+    if (count_edge/ (N.size() * N.size()-1) > phi){
+       return k_vertex_Cover(G[v],best_clique_size)
+    }else{
+      MaximumCliqueSearch(G[N],{v})
+    }
     
 
   }
 
-} // namespace lazymc
+} 
