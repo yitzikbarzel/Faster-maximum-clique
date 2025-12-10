@@ -1,5 +1,5 @@
 #include "lazymc/lazygraph.h"
-#include <algorithm> // for std::sort
+#include <algorithm>
 
 namespace lazymc {
 

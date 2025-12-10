@@ -1,42 +1,52 @@
+#include "lazymc/lazymc.h"
+#include "lazymc/lazygraph.h"
+
+#include <cstddef>
 #include <vector>
 #include <cstdint>
-#include <chrono>
 
 namespace lazymc {
 
-// Forward declarations
-std::vector<int32_t> degree_based_heuristic(
-    const std::vector<std::vector<int32_t>>& G, 
-    int top_k);
+namespace {
+// Global incumbent clique, as in Algorithm 1 (C*).
+// For now it is only used inside LazyMC_run.
+std::vector<int32_t> g_incumbent_clique;
+} // namespace
 
-struct MCResult { 
-    std::vector<int32_t> clique; 
-    int64_t nodes = 0; 
-    double ms = 0.0; 
-};
+std::vector<int32_t> LazyMC_run(const AdjList& G) {
+    // Step 2: initialize incumbent clique C* = {}
+    g_incumbent_clique.clear();
 
-MCResult run_lazymc(const std::vector<std::vector<int32_t>>& G) {
-    auto start = std::chrono::high_resolution_clock::now();
-    
-    MCResult result;
-    
-    if (G.empty()) {
-        return result;
+    // TODO (Step 3): DegreeBasedHeuristicSearch(G)
+    // This should update g_incumbent_clique when implemented.
+
+    const std::size_t n = G.size();
+
+    // Step 4: KCore(G, |C*|)
+    // For now we create a trivial core vector filled with zeros.
+    std::vector<int32_t> core(n, 0);
+
+    // Step 5: DetermineSortOrder(G, c)
+    // For now we use identity order: H-labels == G-labels.
+    std::vector<int32_t> relabel_to_original(n);
+    std::vector<int32_t> original_to_relabel(n);
+
+    for (std::size_t v = 0; v < n; ++v) {
+        relabel_to_original[v] = static_cast<int32_t>(v); // H -> G
+        original_to_relabel[v] = static_cast<int32_t>(v); // G -> H
     }
-    
-    // Step 1: Degree-based heuristic search (Algorithm 5)
-    // Use top 10 highest-degree vertices as starting points
-    result.clique = degree_based_heuristic(G, 10);
-    
-    // TODO: Add k-core computation and vertex ordering
-    // TODO: Add coreness-based heuristic search (Algorithm 6)
-    // TODO: Add systematic search (Algorithm 7)
-    
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    result.ms = duration.count();
-    
-    return result;
+
+    // Step 6: build LazyGraph H from G, order o, and core values.
+    LazyGraph H(G, relabel_to_original, original_to_relabel, core);
+
+    // TODO (Step 7): CorenessBasedHeuristicSearch(H, core)
+    // This should also update g_incumbent_clique.
+
+    // TODO (Step 8): SystematicSearch(H, core)
+    // This should also update g_incumbent_clique.
+
+    // For now we simply return the current incumbent clique (possibly empty).
+    return g_incumbent_clique;
 }
 
 } // namespace lazymc
