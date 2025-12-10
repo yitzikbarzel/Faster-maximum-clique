@@ -8,6 +8,7 @@ add_executable(lazymc_tests
   test_k_vertex_cover.cpp
   test_degree_heuristic.cpp
   test_intersect_functions.cpp
+  test_lazygraph.cpp
 )
 
 target_link_libraries(lazymc_tests
