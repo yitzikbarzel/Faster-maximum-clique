@@ -1,4 +1,4 @@
-#include "include/lazygraph.h"
+#include "lazymc/lazygraph.h"
 #include <algorithm> // for std::sort
 
 namespace lazymc {
