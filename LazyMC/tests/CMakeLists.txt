@@ -9,6 +9,7 @@ add_executable(lazymc_tests
   test_degree_heuristic.cpp
   test_intersect_functions.cpp
   test_lazygraph.cpp
+  test_kcore.cpp
 )
 
 target_link_libraries(lazymc_tests

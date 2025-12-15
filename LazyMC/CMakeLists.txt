@@ -53,6 +53,7 @@ add_library(lazymc STATIC
   src/NeighborSearch.cpp
   src/Systematic_search.cpp
   src/graph_processing.cpp
+  src/kcore.cpp
   
 )
 
