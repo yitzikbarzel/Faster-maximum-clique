@@ -1,5 +1,7 @@
 #include "lazymc/lazymc.h"
 #include "lazymc/lazygraph.h"
+#include "lazymc/kcore.h"
+
 
 #include <cstddef>
 #include <vector>
@@ -23,8 +25,9 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
     const std::size_t n = G.size();
 
     // Step 4: KCore(G, |C*|)
-    // For now we create a trivial core vector filled with zeros.
-    std::vector<int32_t> core(n, 0);
+    const int32_t clique_lb = static_cast<int32_t>(g_incumbent_clique.size());
+    std::vector<int32_t> core = KCore(G, clique_lb);
+
 
     // Step 5: DetermineSortOrder(G, c)
     // For now we use identity order: H-labels == G-labels.

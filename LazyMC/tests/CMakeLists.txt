@@ -10,6 +10,7 @@ add_executable(lazymc_tests
   test_intersect_functions.cpp
   test_lazygraph.cpp
   test_kcore.cpp
+  test_determine_sort_order.cpp
 )
 
 target_link_libraries(lazymc_tests

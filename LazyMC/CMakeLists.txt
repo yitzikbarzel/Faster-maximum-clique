@@ -54,6 +54,7 @@ add_library(lazymc STATIC
   src/Systematic_search.cpp
   src/graph_processing.cpp
   src/kcore.cpp
+  src/determine_sort_order.cpp
   
 )
 
