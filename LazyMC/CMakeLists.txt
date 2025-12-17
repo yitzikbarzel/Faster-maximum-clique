@@ -50,7 +50,7 @@ add_library(lazymc STATIC
   src/k_vertex_cover.cpp
   src/lazygraph.cpp
   src/lazymc.cpp
-  src/NeighborSearch.cpp
+  src/neighbor_search.cpp
   src/systematic_search.cpp
   src/graph_processing.cpp
   src/kcore.cpp

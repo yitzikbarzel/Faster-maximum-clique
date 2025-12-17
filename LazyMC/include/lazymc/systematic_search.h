@@ -1,15 +1,15 @@
 #pragma once
 
-#include <vector>
 #include <cstdint>
+#include <vector>
 
 #include "lazymc/lazygraph.h"
 
 namespace lazymc {
 
-// Systematic search (Algorithm 7 in the paper).
-// Returns a clique as a list of vertices in G-labels.
+// Algorithm 7: Systematic search over neighborhoods (calls NeighborSearch).
+// Returns best clique found (in ORIGINAL G-labeling).
 std::vector<int32_t> systematic_search(LazyGraph& H,
-                                       const std::vector<int32_t>& core);
+                                       const std::vector<int32_t>& core_H);
 
 } // namespace lazymc
