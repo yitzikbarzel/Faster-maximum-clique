@@ -39,23 +39,31 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
 
     // Step 5: DetermineSortOrder(G, core)
     const SortOrder order = DetermineSortOrder(G, core);
-    const std::vector<int32_t>& relabel_to_original = order.relabel_to_original;
-    const std::vector<int32_t>& original_to_relabel = order.original_to_relabel;
+    // Convert core from G-labeling to H-labeling
+    std::vector<int32_t> core_H(order.relabel_to_original.size(), 0);
+    for (std::size_t vH = 0; vH < order.relabel_to_original.size(); ++vH) {
+    const int32_t vG = order.relabel_to_original[vH];
+    core_H[vH] = core[static_cast<std::size_t>(vG)];
+}
 
 
     // Step 6: build LazyGraph H from G, order o, and core values.
-    LazyGraph H(G, relabel_to_original, original_to_relabel, core);
+    LazyGraph H(G, order.relabel_to_original, order.original_to_relabel, core_H);
+
 {
-    // Step 7: CorenessBasedHeuristicSearch(H, core)
-    std::vector<int32_t> clique = coreness_based_heuristic(H, core);
+   // Step 7: CorenessBasedHeuristicSearch(H, core_H)
+
+    std::vector<int32_t> clique = coreness_based_heuristic(H, core_H);
     if (clique.size() > g_incumbent_clique.size()) {
         g_incumbent_clique = std::move(clique);
     }
+
+
 }
 
    // Step 8: SystematicSearch(H, core)
 {
-    std::vector<int32_t> clique = systematic_search(H, core);
+    std::vector<int32_t> clique = systematic_search(H, core_H);
     if (clique.size() > g_incumbent_clique.size()) {
         g_incumbent_clique = std::move(clique);
     }
