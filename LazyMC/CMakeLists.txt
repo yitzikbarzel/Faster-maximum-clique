@@ -51,10 +51,11 @@ add_library(lazymc STATIC
   src/lazygraph.cpp
   src/lazymc.cpp
   src/NeighborSearch.cpp
-  src/Systematic_search.cpp
+  src/systematic_search.cpp
   src/graph_processing.cpp
   src/kcore.cpp
   src/determine_sort_order.cpp
+  src/coreness_heuristic.cpp
   
 )
 

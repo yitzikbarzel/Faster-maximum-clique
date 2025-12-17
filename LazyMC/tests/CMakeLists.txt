@@ -11,6 +11,7 @@ add_executable(lazymc_tests
   test_lazygraph.cpp
   test_kcore.cpp
   test_determine_sort_order.cpp
+  test_algo1.cpp
 )
 
 target_link_libraries(lazymc_tests
