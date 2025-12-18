@@ -23,7 +23,7 @@ std::vector<int32_t> systematic_search(LazyGraph& H,
     // Incumbent clique (in G-labeling)
     std::vector<int32_t> best_clique_G;
 
-    constexpr double phi = 0.6; // tunable
+    constexpr double phi = 0.9; // tunable
 
     // Lines 2-5: warm-up pass
     // parfor k ← |C*| to degeneracy+1:

@@ -67,6 +67,13 @@ target_include_directories(lazymc
 # ---- CLI ----
 add_executable(lazymc_cli src/main.cpp)
 target_link_libraries(lazymc_cli PRIVATE lazymc)
+add_executable(bench_cli
+  src/bench_cli.cpp
+  src/mcqd_adapter.cpp
+)
+
+target_link_libraries(bench_cli PRIVATE lazymc mcqd_lib)
+
 
 # ---- Benchmarks ----
 add_executable(bk_cli src/bk_cli.cpp)
