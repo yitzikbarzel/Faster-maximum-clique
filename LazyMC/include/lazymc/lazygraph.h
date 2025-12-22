@@ -8,6 +8,23 @@
 
 namespace lazymc {
 
+// Counts |N ∩ neighbors(w)| using marking.
+// mark[x] == stamp  <=>  x ∈ N
+inline int32_t count_marked_neighbors(
+    const std::vector<int32_t>& neighbors,
+    const std::vector<int32_t>& mark,
+    int32_t stamp)
+{
+    int32_t cnt = 0;
+    for (int32_t u : neighbors) {
+        if (mark[u] == stamp) {
+            ++cnt;
+        }
+    }
+    return cnt;
+}
+
+
 // Original adjacency list: vertices labeled 0..n-1.
 using AdjList = std::vector<std::vector<int32_t>>;
 

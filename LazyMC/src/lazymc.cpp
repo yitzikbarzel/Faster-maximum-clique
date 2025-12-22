@@ -24,7 +24,7 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
 
     // Step 3: DegreeBasedHeuristicSearch(G)
 { 
-    std::vector<int32_t> clique = degree_based_heuristic(G, 36);
+    std::vector<int32_t> clique = degree_based_heuristic(G, 128);
 
     if (clique.size() > g_incumbent_clique.size()) {
         g_incumbent_clique = std::move(clique);
