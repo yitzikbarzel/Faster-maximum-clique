@@ -20,8 +20,9 @@ std::vector<int32_t> systematic_search(LazyGraph& H,
         max_core = std::max(max_core, core_H[static_cast<std::size_t>(v)]);
     }
 
-    // Incumbent clique (in G-labeling)
-    std::vector<int32_t> best_clique_G;
+   const int32_t local_best  = static_cast<int32_t>(best_clique_G.size());
+const int32_t global_best = g_best_size.load(std::memory_order_relaxed);
+const int32_t best = std::max(local_best, global_best);
 
     constexpr double phi = 0.7; // tunable
 
