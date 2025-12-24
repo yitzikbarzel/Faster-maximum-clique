@@ -5,30 +5,28 @@
 #include "lazymc/degree_heuristic.h"
 #include "lazymc/coreness_heuristic.h"
 #include "lazymc/systematic_search.h"
+#include "lazymc/incumbent.h"
 
 #include <cstddef>
 #include <vector>
 #include <cstdint>
+#include <atomic>
 
 namespace lazymc {
 
-namespace {
 // Global incumbent clique, as in Algorithm 1 (C*).
-// For now it is only used inside LazyMC_run.
 std::vector<int32_t> g_incumbent_clique;
-} // namespace
+std::atomic<int32_t> g_best_size{0};
 
 std::vector<int32_t> LazyMC_run(const AdjList& G) {
     // Step 2: initialize incumbent clique C* = {}
-    g_incumbent_clique.clear();
+    reset_incumbent();
 
   //  Step 3: DegreeBasedHeuristicSearch(G)
 { 
     std::vector<int32_t> clique = degree_based_heuristic(G, 350);
 
-    if (clique.size() > g_incumbent_clique.size()) {
-        g_incumbent_clique = std::move(clique);
-    }
+    try_update_incumbent(std::move(clique));
 }
 
 
@@ -54,9 +52,7 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
    // Step 7: CorenessBasedHeuristicSearch(H, core_H)
 
     std::vector<int32_t> clique = coreness_based_heuristic(H, core_H);
-    if (clique.size() > g_incumbent_clique.size()) {
-        g_incumbent_clique = std::move(clique);
-    }
+    try_update_incumbent(std::move(clique));
 
 
 }
@@ -64,9 +60,7 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
    // Step 8: SystematicSearch(H, core)
 {
     std::vector<int32_t> clique = systematic_search(H, core_H);
-    if (clique.size() > g_incumbent_clique.size()) {
-        g_incumbent_clique = std::move(clique);
-    }
+    try_update_incumbent(std::move(clique));
 }
 
 
