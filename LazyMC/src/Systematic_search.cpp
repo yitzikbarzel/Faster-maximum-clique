@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <shared_mutex>
 #include <thread>
 #include <vector>
@@ -18,7 +19,7 @@ namespace {
 struct GlobalIncumbent {
     std::atomic<int32_t> best_size;
     mutable std::shared_mutex mtx;
-    std::vector<int32_t> best; b
+    std::vector<int32_t> best;
     GlobalIncumbent() : best_size(0) {
         sync_incumbent_size();
         best_size.store(g_best_size.load(std::memory_order_relaxed),
@@ -98,7 +99,7 @@ std::vector<int32_t> systematic_search(LazyGraph& H,
         }
     }
 
-    constexpr double phi = 0.7;
+    constexpr double phi = 0.1;
     GlobalIncumbent global;
 
     const unsigned hw = std::max(1u, std::thread::hardware_concurrency());

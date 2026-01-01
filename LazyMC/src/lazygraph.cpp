@@ -1,4 +1,5 @@
 #include "lazymc/lazygraph.h"
+#include "lazymc/incumbent.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -100,6 +101,7 @@ void LazyGraph::build_hashed(int32_t v) {
 
     const int32_t v_G = relabel_to_original_[idx];
     const auto& neighbors_G = (*G_)[static_cast<std::size_t>(v_G)];
+    const int32_t incumbent = g_best_size.load(std::memory_order_relaxed);
     
 
     for (int32_t u_G : neighbors_G) {
@@ -109,7 +111,7 @@ void LazyGraph::build_hashed(int32_t v) {
         }
 
         int32_t u_H = original_to_relabel_[u_idx];
-        if (u_H >= 0) {
+        if (u_H >= 0 && core_[static_cast<std::size_t>(u_H)] >= incumbent) {
             hashed_[idx].insert(u_H);
         }
     }
