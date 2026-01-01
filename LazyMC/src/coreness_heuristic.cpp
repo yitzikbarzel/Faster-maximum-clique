@@ -1,5 +1,7 @@
 #include "lazymc/coreness_heuristic.h"
 #include "lazymc/intersect_functions.h"
+#include "lazymc/incumbent.h"
+
 
 #include <algorithm>
 #include <atomic>
@@ -14,25 +16,44 @@ namespace lazymc {
 namespace {
 
 struct GlobalIncumbent {
-    std::atomic<int32_t> best_size{0};
+    std::atomic<int32_t> best_size;
     mutable std::shared_mutex mtx;
-    std::vector<int32_t> best; // Stored in H-labeling
+    std::vector<int32_t> best; // H-labeling
+
+    GlobalIncumbent() {
+        // initialize from global project incumbent
+        sync_incumbent_size();
+        best_size.store(g_best_size.load(std::memory_order_relaxed),
+                        std::memory_order_relaxed);
+    }
 
     int32_t size() const noexcept {
         return best_size.load(std::memory_order_relaxed);
     }
 
-    void try_update(std::vector<int32_t>&& candidate) {
-        const int32_t s = static_cast<int32_t>(candidate.size());
+    void try_update(std::vector<int32_t>&& candidate_H,
+                    LazyGraph& H) {
+        const int32_t s = static_cast<int32_t>(candidate_H.size());
         if (s <= size()) return;
 
         std::unique_lock<std::shared_mutex> lock(mtx);
-        if (s > static_cast<int32_t>(best.size())) {
-            best = std::move(candidate);
-            best_size.store(static_cast<int32_t>(best.size()), std::memory_order_relaxed);
+        if (s <= static_cast<int32_t>(best.size())) return;
+
+        // update local (H-labeling)
+        best = candidate_H;
+        best_size.store(s, std::memory_order_relaxed);
+
+        // also update global project incumbent (G-labeling)
+        std::vector<int32_t> candidate_G;
+        candidate_G.reserve(candidate_H.size());
+        for (int32_t vH : candidate_H) {
+            candidate_G.push_back(H.to_original(vH));
         }
+
+        try_update_incumbent(std::move(candidate_G));
     }
 };
+
 
 static void run_candidate_core(
     LazyGraph& H,
@@ -41,7 +62,6 @@ static void run_candidate_core(
 ) {
     std::vector<int32_t> tmp;
 
-    // N <- N_G^+(v)
     std::vector<int32_t> N;
     const auto& Nv = H.sorted_neighbors(v);
     N.reserve(Nv.size());
@@ -49,36 +69,33 @@ static void run_candidate_core(
         if (u > v) N.push_back(u);
     }
 
-    // C = {v}
     std::vector<int32_t> C;
     C.reserve(64);
     C.push_back(v);
 
     while (!N.empty()) {
-        // u <- highest-numbered vertex in N
         const int32_t u = *std::max_element(N.begin(), N.end());
 
-        // theta = |C*| - |C|
+        // θ = |C*| − |C|  (GLOBAL, dynamic)
         const int32_t theta =
             global.size() - static_cast<int32_t>(C.size());
 
-        // N <- N ∩ N_G(u)   (intersect-gt with threshold theta)
         const auto& Bu = H.hashed_neighbors(u);
         const int32_t d = intersect_gt(N, Bu, tmp, theta);
 
-        // C <- C ∪ {u}
         C.push_back(u);
 
         if (d <= 0) {
-            N.clear();
-        } else {
-            N.assign(tmp.begin(), tmp.begin() + d);
-            N.erase(std::remove(N.begin(), N.end(), u), N.end());
+            break;
         }
+
+        N.assign(tmp.begin(), tmp.begin() + d);
+        N.erase(std::remove(N.begin(), N.end(), u), N.end());
     }
 
-    global.try_update(std::move(C));
+    global.try_update(std::move(C), H);
 }
+
 
 } // namespace
 
