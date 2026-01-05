@@ -68,10 +68,12 @@ k_vertex_cover_res k_vertex_cover_induced_complement(
 }
 
 // Build induced subgraph for {v} ∪ N and run MC search; return the clique (G-labeling).
+// initial_best_size: skip searching if we can't beat this size
 std::vector<int32_t> maximum_clique_induced(
     const AdjList& G,
     const std::vector<int32_t>& N,
-    int32_t v
+    int32_t v,
+    int32_t initial_best_size = 0
 ) {
     const std::size_t n_vertices = G.size();
     if (v < 0 || static_cast<std::size_t>(v) >= n_vertices) return {};
@@ -110,7 +112,7 @@ std::vector<int32_t> maximum_clique_induced(
         subG[x] = std::move(subNbrs);
     }
 
-    return bron_kerbosch_maximum(subG); // returns vertices in G-labeling
+    return bron_kerbosch_maximum(subG, initial_best_size); // returns vertices in G-labeling
 }
 
 } // anonymous namespace
@@ -221,7 +223,7 @@ bool NeighborSearch(LazyGraph& H,
 
         // Case 1: aborted → fallback to BK
         if (res.aborted) {
-            std::vector<int32_t> clique = maximum_clique_induced(G, N_G, vG);
+            std::vector<int32_t> clique = maximum_clique_induced(G, N_G, vG, best);
             if (static_cast<int32_t>(clique.size()) > best) {
                 out_clique_G = std::move(clique);
                 return true;
@@ -260,7 +262,7 @@ bool NeighborSearch(LazyGraph& H,
 
     // Not dense: BK fallback
     {
-        std::vector<int32_t> clique = maximum_clique_induced(G, N_G, vG);
+        std::vector<int32_t> clique = maximum_clique_induced(G, N_G, vG, best);
         if (static_cast<int32_t>(clique.size()) > best) {
             out_clique_G = std::move(clique);
             return true;

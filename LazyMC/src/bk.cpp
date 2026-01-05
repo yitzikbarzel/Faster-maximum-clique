@@ -200,12 +200,21 @@ std::vector<std::vector<int>> bron_kerbosch_all(const AdjMap& G) {
 
 // ======================= Public API: maximum clique ========================
 
-std::vector<int> bron_kerbosch_maximum(const AdjMap& G) {
+std::vector<int> bron_kerbosch_maximum(const AdjMap& G, int initial_best_size) {
     std::vector<int> best;
 
     if (G.empty()) {
         return best; // no vertices, no clique
     }
+
+    // Early prune: if graph can't possibly beat initial_best_size, return empty
+    if (static_cast<int>(G.size()) <= initial_best_size) {
+        return best;
+    }
+
+    // Initialize best with a dummy size so pruning kicks in immediately
+    // We use resize to set the size without actual vertices (they won't be returned)
+    best.resize(static_cast<std::size_t>(initial_best_size));
 
     std::vector<int> P;
     P.reserve(G.size());
@@ -219,6 +228,19 @@ std::vector<int> bron_kerbosch_maximum(const AdjMap& G) {
     std::vector<int> X; // excluded vertices
 
     bron_kerbosch_recursive_pivot_max(G, R, P, X, best);
+
+    // If we only have the dummy, no better clique was found
+    if (!best.empty() && best[0] == 0 && static_cast<int>(best.size()) == initial_best_size) {
+        // Check if it's the dummy (all zeros)
+        bool is_dummy = true;
+        for (int v : best) {
+            if (v != 0) { is_dummy = false; break; }
+        }
+        if (is_dummy && initial_best_size > 0) {
+            best.clear();
+        }
+    }
+
     return best;
 }
 
