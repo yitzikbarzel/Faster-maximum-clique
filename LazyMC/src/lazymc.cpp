@@ -82,14 +82,12 @@
 #include <vector>
 #include <cstdint>
 #include <atomic>
-#include <mutex>
 
 namespace lazymc {
 
 // Global incumbent clique, as in Algorithm 1 (C*).
 std::vector<int32_t> g_incumbent_clique;
 std::atomic<int32_t> g_best_size{0};
-std::mutex g_incumbent_mutex;
 
 std::vector<int32_t> LazyMC_run(const AdjList& G) {
     // Step 2: initialize incumbent clique C* = {}
