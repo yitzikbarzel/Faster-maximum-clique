@@ -125,13 +125,17 @@ std::vector<int32_t> degree_based_heuristic(const AdjList& G, int top_k) {
     std::vector<int32_t> verts(static_cast<std::size_t>(n));
     for (int32_t v = 0; v < n; ++v) verts[static_cast<std::size_t>(v)] = v;
 
-    std::nth_element(
-        verts.begin(),
-        verts.begin() + k,
-        verts.end(),
-        [&](int32_t a, int32_t b) { return deg[static_cast<std::size_t>(a)] > deg[static_cast<std::size_t>(b)]; });
+    // Only use nth_element if k < n to avoid undefined behavior
+    if (k < n) {
+        std::nth_element(
+            verts.begin(),
+            verts.begin() + k,
+            verts.end(),
+            [&](int32_t a, int32_t b) { return deg[static_cast<std::size_t>(a)] > deg[static_cast<std::size_t>(b)]; });
 
-    verts.resize(static_cast<std::size_t>(k));
+        verts.resize(static_cast<std::size_t>(k));
+    }
+    // If k == n, keep all vertices (no resize needed)
 
     // Optional but helpful: sort only the top-K for stronger pruning/early shrink
     std::sort(

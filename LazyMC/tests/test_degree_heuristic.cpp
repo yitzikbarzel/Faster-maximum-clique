@@ -5,6 +5,7 @@
 
 #include "lazymc/degree_heuristic.h"
 #include "lazymc/lazygraph.h"
+#include "lazymc/incumbent.h"
 
 namespace {
 
@@ -31,6 +32,13 @@ struct IdentityLazyGraph {
 
 } // namespace
 
+class DegreeHeuristicTestFixture : public ::testing::Test {
+protected:
+    void SetUp() override {
+        lazymc::reset_incumbent();
+    }
+};
+
 TEST(DegreeBasedHeuristicTest, EmptyGraph) {
     lazymc::AdjList G;
     IdentityLazyGraph ig(G);
@@ -45,7 +53,7 @@ TEST(DegreeBasedHeuristicTest, SingleVertex) {
     EXPECT_EQ(result.size(), 1);
 }
 
-TEST(DegreeBasedHeuristicTest, Triangle) {
+TEST_F(DegreeHeuristicTestFixture, Triangle) {
     lazymc::AdjList G = {
         {1, 2},
         {0, 2},
@@ -56,7 +64,7 @@ TEST(DegreeBasedHeuristicTest, Triangle) {
     EXPECT_EQ(result.size(), 3);
 }
 
-TEST(DegreeBasedHeuristicTest, K4Clique) {
+TEST_F(DegreeHeuristicTestFixture, K4Clique) {
     lazymc::AdjList G = {
         {1, 2, 3},
         {0, 2, 3},
