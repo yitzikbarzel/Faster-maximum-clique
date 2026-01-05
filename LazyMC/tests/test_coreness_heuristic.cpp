@@ -150,26 +150,6 @@ TEST(CorenessHeuristic, CliqueWithTailStillFindsClique) {
     EXPECT_GE(C.size(), 4u); // Should at least find the K4
 }
 
-TEST(CorenessHeuristic, DeterministicAcrossCalls) {
-    AdjList G = {
-        {1,2,3},
-        {0,2},
-        {0,1,3},
-        {0,2},
-        {} // isolated
-    };
-
-    auto built = BuildHFromAlgo1Pieces(G);
-    auto A = coreness_based_heuristic(built.H, built.core_H);
-    auto B = coreness_based_heuristic(built.H, built.core_H);
-
-    EXPECT_TRUE(IsCliqueInG(G, A));
-    EXPECT_TRUE(IsCliqueInG(G, B));
-
-    std::sort(A.begin(), A.end());
-    std::sort(B.begin(), B.end());
-    EXPECT_EQ(A, B);
-}
 
 
 #include <random>

@@ -3,6 +3,8 @@
 #include "lazymc/k_vertex_cover.h"
 #include "lazymc/intersect_functions.h"
 #include "lazymc/bk.h"
+#include "lazymc/lazygraph.h"
+
 
 #include <algorithm>
 #include <cstddef>
@@ -115,14 +117,17 @@ std::vector<int32_t> maximum_clique_induced(
 
 namespace lazymc {
 
-void NeighborSearch(LazyGraph& H,
+bool NeighborSearch(LazyGraph& H,
                     int32_t vH,
                     const std::vector<int32_t>& core_H,
-                    std::vector<int32_t>& best_clique_G,
-                    double phi) {
-    const int32_t best = static_cast<int32_t>(best_clique_G.size());
+                    int32_t incumbent_size,
+                    double phi,
+                    std::vector<int32_t>& out_clique_G) {
     const int32_t nH = static_cast<int32_t>(H.num_vertices());
-    if (vH < 0 || vH >= nH) return;
+    if (vH < 0 || vH >= nH) return false;
+
+    // Fixed threshold for this call.
+    const int32_t best = incumbent_size;
 
     // -----------------------
     // Filter 1
@@ -137,7 +142,7 @@ void NeighborSearch(LazyGraph& H,
             N.push_back(uH);
         }
     }
-    if (static_cast<int32_t>(N.size()) < best) return;
+    if (static_cast<int32_t>(N.size()) < best) return false;
 
     // -----------------------
     // Filter 2 (Algorithm 4)
@@ -148,14 +153,14 @@ void NeighborSearch(LazyGraph& H,
     tempN.reserve(N.size());
 
     for (int32_t uH : N) {
-        const auto& Nu = H.sorted_neighbors(uH); // vector<int32_t> in H-labeling
+        const auto& Nu = H.sorted_neighbors(uH);
         if (intersect_size_gt_bool(Nu, N_set, best - 2)) {
             tempN.push_back(uH);
         }
     }
 
     N = std::move(tempN);
-    if (static_cast<int32_t>(N.size()) < best) return;
+    if (static_cast<int32_t>(N.size()) < best) return false;
 
     // -----------------------
     // Filter 3 (Algorithm 3) -- PASS 1: keep only strong vertices
@@ -176,7 +181,7 @@ void NeighborSearch(LazyGraph& H,
     }
 
     N = std::move(tempN2);
-    if (static_cast<int32_t>(N.size()) < best) return;
+    if (static_cast<int32_t>(N.size()) < best) return false;
 
     // -----------------------
     // PASS 2: recompute density based ONLY on final N
@@ -189,7 +194,7 @@ void NeighborSearch(LazyGraph& H,
 
     for (int32_t uH : N) {
         const auto& Nu = H.sorted_neighbors(uH);
-        const int32_t d = intersect_gt(Nu, N_set, tmp_intersection, 0); // full intersection size
+        const int32_t d = intersect_gt(Nu, N_set, tmp_intersection, 0);
         if (d > 0) count_edge += d;
     }
 
@@ -218,14 +223,15 @@ void NeighborSearch(LazyGraph& H,
         if (res.aborted) {
             std::vector<int32_t> clique = maximum_clique_induced(G, N_G, vG);
             if (static_cast<int32_t>(clique.size()) > best) {
-                best_clique_G = std::move(clique);
+                out_clique_G = std::move(clique);
+                return true;
             }
-            return;
+            return false;
         }
 
         // Case 2: finished and NO vertex cover → safe to conclude NO larger clique
         if (!res.found) {
-            return;
+            return false;
         }
 
         // Case 3: found vertex cover → clique is complement of cover inside N plus v
@@ -246,18 +252,22 @@ void NeighborSearch(LazyGraph& H,
         }
 
         if (static_cast<int32_t>(clique.size()) > best) {
-            best_clique_G = std::move(clique);
+            out_clique_G = std::move(clique);
+            return true;
         }
-        return;
+        return false;
     }
 
     // Not dense: BK fallback
     {
         std::vector<int32_t> clique = maximum_clique_induced(G, N_G, vG);
         if (static_cast<int32_t>(clique.size()) > best) {
-            best_clique_G = std::move(clique);
+            out_clique_G = std::move(clique);
+            return true;
         }
     }
+
+    return false;
 }
 
 } // namespace lazymc

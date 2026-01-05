@@ -95,7 +95,7 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
 
     // Step 3: DegreeBasedHeuristicSearch(G)
     {
-        std::vector<int32_t> clique = degree_based_heuristic(G,3500);
+        std::vector<int32_t> clique = degree_based_heuristic(G, 10);
         try_update_incumbent(std::move(clique));
     }
 
@@ -104,7 +104,7 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
     std::vector<int32_t> core = KCore(G, clique_lb);
 
     // Step 5: DetermineSortOrder(G, core)
-    const SortOrder order = DetermineSortOrder(G, core);
+    SortOrder order = DetermineSortOrder(G, core);
 
     // Convert core from G-labeling to H-labeling
     std::vector<int32_t> core_H(order.relabel_to_original.size(), 0);
