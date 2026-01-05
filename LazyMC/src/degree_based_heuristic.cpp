@@ -1,98 +1,98 @@
-#include <vector>
-#include <cstdint>
+#include "lazymc/degree_heuristic.h"
+#include "lazymc/intersect_functions.h"
+
 #include <algorithm>
 #include <unordered_set>
 
 namespace lazymc {
 
-// Global incumbent clique (shared across the algorithm)
-// In a real implementation, this should be thread-safe
-extern std::vector<int32_t> global_incumbent_clique;
-
-// Degree-based heuristic search (Algorithm 5 from paper)
-// Returns the best clique found starting from top-K highest degree vertices
-std::vector<int32_t> degree_based_heuristic(
-    const std::vector<std::vector<int32_t>>& G, 
-    int top_k) {
-    
+std::vector<int32_t> degree_based_heuristic(const AdjList& G, int top_k) {
     if (G.empty()) return {};
-    
-    int n = static_cast<int>(G.size());
-    std::vector<int32_t> best_clique;
-    
-    // Step 1: Identify top-K vertices with highest degree
-    std::vector<std::pair<int32_t, int32_t>> degree_vertex;
-    for (int32_t v = 0; v < n; ++v) {
-        degree_vertex.push_back({static_cast<int32_t>(G[v].size()), v});
+
+    const int32_t n = static_cast<int32_t>(G.size());
+
+    // Identity relabeling: H-ids == G-ids.
+    std::vector<int32_t> relabel_to_original(n);
+    std::vector<int32_t> original_to_relabel(n);
+    std::vector<int32_t> core(n, 0);
+
+    for (int32_t i = 0; i < n; ++i) {
+        relabel_to_original[i] = i;
+        original_to_relabel[i] = i;
     }
-    
-    // Sort by degree (descending)
-    std::sort(degree_vertex.begin(), degree_vertex.end(), 
+
+    LazyGraph H(G, relabel_to_original, original_to_relabel, core);
+    return degree_based_heuristic(H, top_k);
+}
+
+std::vector<int32_t> degree_based_heuristic(LazyGraph& H, int top_k) {
+    const int32_t n = static_cast<int32_t>(H.num_vertices());
+    if (n <= 0) return {};
+
+    std::vector<int32_t> best_clique;
+
+    std::vector<std::pair<int32_t,int32_t>> degree_vertex;
+    degree_vertex.reserve(static_cast<std::size_t>(n));
+    for (int32_t v = 0; v < n; ++v) {
+        degree_vertex.push_back({static_cast<int32_t>(H.sorted_neighbors(v).size()), v});
+    }
+
+    std::sort(degree_vertex.begin(), degree_vertex.end(),
               [](const auto& a, const auto& b) { return a.first > b.first; });
-    
-    // Limit to top_k vertices
-    int k = std::min(top_k, n);
-    
-    // Step 2: For each of top-K vertices, try to build a clique
-    for (int i = 0; i < k; ++i) {
-        int32_t v = degree_vertex[i].second;
-        
-        // Step 3: N ← {u ∈ N_G(v) : |N_G(u)| ≥ |C*|}
+
+    const int32_t k = std::min<int32_t>(top_k, n);
+
+    std::vector<int32_t> tmp;
+
+    for (int32_t i = 0; i < k; ++i) {
+        const int32_t v = degree_vertex[static_cast<std::size_t>(i)].second;
+
         std::vector<int32_t> N;
-        for (int32_t u : G[v]) {
-            if (static_cast<int32_t>(G[u].size()) >= static_cast<int32_t>(best_clique.size())) {
+        const auto& Nv = H.sorted_neighbors(v);
+        N.reserve(Nv.size());
+        for (int32_t u : Nv) {
+            if (static_cast<int32_t>(H.sorted_neighbors(u).size()) >=
+                static_cast<int32_t>(best_clique.size())) {
                 N.push_back(u);
             }
         }
-        
-        // Step 4: C = {v}
-        std::vector<int32_t> C = {v};
-        
-        // Step 5-10: Greedy clique expansion
+
+        std::vector<int32_t> C;
+        C.push_back(v);
+
         while (!N.empty()) {
-            // Step 7: Find u with maximum |N ∩ N_G(u)|
             int32_t best_u = -1;
             int32_t max_intersection = -1;
-            
+
             for (int32_t w : N) {
-                // Compute |N ∩ N_G(w)| using hash set for efficiency
-                std::unordered_set<int32_t> neighbors_w(G[w].begin(), G[w].end());
-                int32_t intersection_size = 0;
-                
-                for (int32_t x : N) {
-                    if (neighbors_w.count(x) > 0) {
-                        ++intersection_size;
-                    }
-                }
-                
-                if (intersection_size > max_intersection) {
-                    max_intersection = intersection_size;
+                const auto& Bw = H.hashed_neighbors(w);
+                int32_t d = intersect_gt(N, Bw, tmp, max_intersection);
+                if (d > max_intersection) {
+                    max_intersection = d;
                     best_u = w;
                 }
             }
-            
-            if (best_u == -1) break;
-            
-            // Step 8: C ← C ∪ {u}
+
+            if (best_u < 0) break;
+
             C.push_back(best_u);
-            
-            // Step 9: N ← N ∩ N_G(u)
-            std::unordered_set<int32_t> neighbors_u(G[best_u].begin(), G[best_u].end());
-            std::vector<int32_t> new_N;
-            for (int32_t x : N) {
-                if (x != best_u && neighbors_u.count(x) > 0) {
-                    new_N.push_back(x);
-                }
+
+            const auto& Bu = H.hashed_neighbors(best_u);
+            int32_t d = intersect_gt(N, Bu, tmp, 0);
+
+            if (d <= 0) {
+                N.clear();
+            } else {
+                N.assign(tmp.begin(), tmp.begin() + d);
+                N.erase(std::remove(N.begin(), N.end(), best_u), N.end());
             }
-            N = std::move(new_N);
         }
-        
-        // Step 11-12: Update best clique if better
+
         if (C.size() > best_clique.size()) {
             best_clique = std::move(C);
         }
     }
-    
+
     return best_clique;
 }
 

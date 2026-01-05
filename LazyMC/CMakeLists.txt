@@ -50,9 +50,12 @@ add_library(lazymc STATIC
   src/k_vertex_cover.cpp
   src/lazygraph.cpp
   src/lazymc.cpp
-  src/NeighborSearch.cpp
-  src/Systematic_search.cpp
+  src/neighbor_search.cpp
+  src/systematic_search.cpp
   src/graph_processing.cpp
+  src/kcore.cpp
+  src/determine_sort_order.cpp
+  src/coreness_heuristic.cpp
   
 )
 
@@ -64,6 +67,13 @@ target_include_directories(lazymc
 # ---- CLI ----
 add_executable(lazymc_cli src/main.cpp)
 target_link_libraries(lazymc_cli PRIVATE lazymc)
+add_executable(bench_cli
+  src/bench_cli.cpp
+  src/mcqd_adapter.cpp
+)
+
+target_link_libraries(bench_cli PRIVATE lazymc mcqd_lib)
+
 
 # ---- Benchmarks ----
 add_executable(bk_cli src/bk_cli.cpp)
