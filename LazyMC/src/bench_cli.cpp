@@ -157,6 +157,7 @@ int main(int argc, char** argv) {
     std::string input_path;
     bool one_based = false;
     bool print_clique = false;
+    bool profile = false;
     Solver solver = Solver::All;
 
     for (int i = 1; i < argc; ++i) {
@@ -164,11 +165,15 @@ int main(int argc, char** argv) {
         if (a == "--input" && i + 1 < argc) input_path = argv[++i];
         else if (a == "--one-based") one_based = true;
         else if (a == "--print-clique") print_clique = true;
+        else if (a == "--profile") profile = true;
         else if (a == "--solver" && i + 1 < argc) solver = parse_solver(argv[++i]);
         else if (a == "-h" || a == "--help") {
             std::cout
                 << "Usage:\n"
-                << "  bench_cli --input <file> [--one-based] [--print-clique] [--solver <name>]\n"
+                << "  bench_cli --input <file> [--one-based] [--print-clique] [--profile] [--solver <name>]\n"
+                << "\n"
+                << "Options:\n"
+                << "  --profile        Show detailed profiling for each stage (LazyMC only)\n"
                 << "\n"
                 << "Solvers:\n"
                 << "  --solver all     (default)\n"
@@ -196,7 +201,17 @@ int main(int argc, char** argv) {
     // ---- LazyMC ----
     if (solver == Solver::LazyMC || solver == Solver::All) {
         std::vector<int32_t> C;
-        const double ms = time_ms([&]() { C = lazymc::LazyMC_run(G); });
+        double ms = 0.0;
+        
+        if (profile) {
+            // Use profiled version
+            lazymc::ProfilingResult res = lazymc::LazyMC_run_profiled(G);
+            C = res.final_clique;
+            ms = res.total_time_ms;
+            res.print_summary();
+        } else {
+            ms = time_ms([&]() { C = lazymc::LazyMC_run(G); });
+        }
 
         const bool ok = is_clique(G, C);
         std::cout << "[LazyMC] clique_size=" << C.size()
