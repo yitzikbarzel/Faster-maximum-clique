@@ -153,7 +153,7 @@ std::vector<int32_t> maximum_clique_induced(
 
         // std::sort(subNbrs.begin(), subNbrs.end());
         // subNbrs.erase(std::unique(subNbrs.begin(), subNbrs.end()), subNbrs.end());
-        // subG[x] = std::move(subNbrs);
+        subG[x] = std::move(subNbrs);
     }
 
         return bron_kerbosch_maximum(subG, initial_best_size); // returns vertices in G-labeling
