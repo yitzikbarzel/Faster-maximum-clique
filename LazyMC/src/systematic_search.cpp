@@ -26,7 +26,12 @@ struct SharedIncumbent {
             g_best_size.load(std::memory_order_relaxed),
             std::memory_order_relaxed
         );
-        best_clique = g_incumbent_clique;
+        const auto incumbent =
+            std::atomic_load_explicit(&g_incumbent_clique,
+                                      std::memory_order_acquire);
+        if (incumbent) {
+            best_clique = *incumbent;
+        }
     }
 
     int32_t best_size() const noexcept {

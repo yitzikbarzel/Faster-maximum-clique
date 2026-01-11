@@ -83,12 +83,14 @@
 #include <vector>
 #include <cstdint>
 #include <atomic>
+#include <memory>
 #include <thread>
 
 namespace lazymc {
 
 // Global incumbent clique, as in Algorithm 1 (C*).
-std::vector<int32_t> g_incumbent_clique;
+std::shared_ptr<const std::vector<int32_t>> g_incumbent_clique =
+    std::make_shared<const std::vector<int32_t>>();
 std::atomic<int32_t> g_best_size{0};
 
 std::vector<int32_t> LazyMC_run(const AdjList& G) {
@@ -102,7 +104,11 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
     }
 
     // Step 4: KCore(G, |C*|)
-    const int32_t clique_lb = static_cast<int32_t>(g_incumbent_clique.size());
+    const auto incumbent_ptr =
+        std::atomic_load_explicit(&g_incumbent_clique,
+                                  std::memory_order_acquire);
+    const int32_t clique_lb =
+        incumbent_ptr ? static_cast<int32_t>(incumbent_ptr->size()) : 0;
     std::vector<int32_t> core = KCore(G, clique_lb);
 
     // Step 5: DetermineSortOrder(G, core)
@@ -132,7 +138,11 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
     }
 
     // Final
-    return g_incumbent_clique;
+    const auto final_incumbent =
+        std::atomic_load_explicit(&g_incumbent_clique,
+                                  std::memory_order_acquire);
+    if (final_incumbent) return *final_incumbent;
+    return {};
 }
 
 // Profiled version: collects timing and clique info for each stage
@@ -176,7 +186,11 @@ ProfilingResult LazyMC_run_profiled(const AdjList& G) {
         
         {
             ScopedTimer timer(stats.duration_ms);
-            const int32_t clique_lb = static_cast<int32_t>(g_incumbent_clique.size());
+            const auto incumbent_ptr =
+                std::atomic_load_explicit(&g_incumbent_clique,
+                                          std::memory_order_acquire);
+            const int32_t clique_lb =
+                incumbent_ptr ? static_cast<int32_t>(incumbent_ptr->size()) : 0;
             core = KCore(G, clique_lb);
         }
         
@@ -254,8 +268,14 @@ ProfilingResult LazyMC_run_profiled(const AdjList& G) {
     // Finalize result
     auto total_end = std::chrono::high_resolution_clock::now();
     result.total_time_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
-    result.final_clique_size = static_cast<int32_t>(g_incumbent_clique.size());
-    result.final_clique = g_incumbent_clique;
+    const auto final_incumbent =
+        std::atomic_load_explicit(&g_incumbent_clique,
+                                  std::memory_order_acquire);
+    result.final_clique_size =
+        final_incumbent ? static_cast<int32_t>(final_incumbent->size()) : 0;
+    if (final_incumbent) {
+        result.final_clique = *final_incumbent;
+    }
     
     return result;
 }
