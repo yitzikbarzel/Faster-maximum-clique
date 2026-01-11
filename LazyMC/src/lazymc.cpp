@@ -97,7 +97,7 @@ std::vector<int32_t> LazyMC_run(const AdjList& G) {
 
     // Step 3: DegreeBasedHeuristicSearch(G)
     {
-        std::vector<int32_t> clique = degree_based_heuristic(G, 10);
+        std::vector<int32_t> clique = degree_based_heuristic(G, 500);
         try_update_incumbent(std::move(clique));
     }
 
@@ -153,7 +153,7 @@ ProfilingResult LazyMC_run_profiled(const AdjList& G) {
         stats.clique_size_before = g_best_size.load(std::memory_order_relaxed);
         
         // Compute thread count: min(hw, top_k, n)
-        const int top_k = 10;
+        const int top_k = 500;
         stats.threads_used = std::min(hw, static_cast<unsigned>(std::min(top_k, n)));
         
         {

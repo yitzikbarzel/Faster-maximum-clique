@@ -4,6 +4,7 @@
 #include "lazymc/intersect_functions.h"
 #include "lazymc/bk.h"
 #include "lazymc/lazygraph.h"
+#include "lazymc/kcore.h"
 
 
 #include <algorithm>
@@ -93,9 +94,52 @@ std::vector<int32_t> maximum_clique_induced(
         }
     }
 
-    AdjMap subG;
+    // Build induced subgraph as AdjList for KCore
+    const std::size_t m = subset.size();
+    
+    // Map from G-vertex to local index
+    std::vector<int32_t> g_to_local(n_vertices, -1);
+    for (std::size_t i = 0; i < m; ++i) {
+        g_to_local[static_cast<std::size_t>(subset[i])] = static_cast<int32_t>(i);
+    }
+    
+    // Build local AdjList for KCore
+    AdjList localG(m);
+    for (std::size_t i = 0; i < m; ++i) {
+        int32_t x = subset[i];
+        const auto& nbrs = G[static_cast<std::size_t>(x)];
+        for (int32_t y : nbrs) {
+            if (y >= 0 && static_cast<std::size_t>(y) < n_vertices &&
+                in_subset[static_cast<std::size_t>(y)]) {
+                localG[i].push_back(g_to_local[static_cast<std::size_t>(y)]);
+            }
+        }
+    }
+    
+    // Compute KCore on induced subgraph - prune vertices with core < initial_best_size
+    std::vector<int32_t> local_core = lazymc::KCore(localG, initial_best_size);
+    
+    // Filter subset: keep only vertices with core >= initial_best_size
+    std::vector<int32_t> filtered_subset;
+    filtered_subset.reserve(m);
+    for (std::size_t i = 0; i < m; ++i) {
+        if (local_core[i] >= initial_best_size) {
+            filtered_subset.push_back(subset[i]);
+        }
+    }
+        if (static_cast<int32_t>(filtered_subset.size()) <= initial_best_size) {
+        return {};
+    }
+    
+    // Rebuild in_subset for filtered vertices
+    std::fill(in_subset.begin(), in_subset.end(), 0);
+    for (int32_t x : filtered_subset) {
+    in_subset[static_cast<std::size_t>(x)] = 1;
+    }
 
-    for (int32_t x : subset) {
+    // Build AdjMap for BK with filtered vertices
+    AdjMap subG;
+    for (int32_t x : filtered_subset) {
         const auto& nbrs = G[static_cast<std::size_t>(x)];
         std::vector<int32_t> subNbrs;
         subNbrs.reserve(nbrs.size());
@@ -107,12 +151,13 @@ std::vector<int32_t> maximum_clique_induced(
             }
         }
 
-        std::sort(subNbrs.begin(), subNbrs.end());
-        subNbrs.erase(std::unique(subNbrs.begin(), subNbrs.end()), subNbrs.end());
-        subG[x] = std::move(subNbrs);
+        // std::sort(subNbrs.begin(), subNbrs.end());
+        // subNbrs.erase(std::unique(subNbrs.begin(), subNbrs.end()), subNbrs.end());
+        // subG[x] = std::move(subNbrs);
     }
 
-    return bron_kerbosch_maximum(subG, initial_best_size); // returns vertices in G-labeling
+        return bron_kerbosch_maximum(subG, initial_best_size); // returns vertices in G-labeling
+
 }
 
 } // anonymous namespace
