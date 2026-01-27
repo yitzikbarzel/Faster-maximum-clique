@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <shared_mutex>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace lazymc {

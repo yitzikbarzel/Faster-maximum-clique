@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(# No dupes in first 100k edges when canonicalized. But the edge count doesn''t match. # Wait - maybe the issue is that the raw file is DIRECTED \\(temporal interactions\\), # and the preprocessed file stores edges in both directions? # 28,183,518 * 2 = 56,367,036, not 47,903,266... # Or maybe the conversion just didn''t properly deduplicate the temporal edges # Let''s check: how was the preprocessed file created? # Let me look at the preprocessing/conversion script grep -r \"\"stackoverflow\"\" /c/Users/1/Faster-maximum-clique/LazyMC/src/ --include=\"\"*.cpp\"\" --include=\"\"*.py\"\" --include=\"\"*.sh\"\" -l ; grep -r \"\"stackoverflow\"\" /c/Users/1/Faster-maximum-clique/LazyMC/ --include=\"\"*.py\"\" --include=\"\"*.sh\"\" -l ; find /c/Users/1/Faster-maximum-clique -name \"\"*.py\"\" -o -name \"\"convert*\"\" -o -name \"\"preprocess*\"\")"
+    ]
+  }
+}
