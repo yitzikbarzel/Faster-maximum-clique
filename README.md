@@ -1,9 +1,4 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/C%2B%2B-17-blue?style=for-the-badge&logo=cplusplus" alt="C++17"/>
-  <img src="https://img.shields.io/badge/CMake-3.20+-064F8C?style=for-the-badge&logo=cmake" alt="CMake"/>
-  <img src="https://img.shields.io/badge/License-CC--BY--4.0-green?style=for-the-badge" alt="License"/>
-  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20WSL-lightgrey?style=for-the-badge" alt="Platform"/>
-</p>
+`C++17` | `CMake 3.20+` | `Windows / Linux / WSL`
 
 # LazyMC — Faster Maximum Clique by Work-Avoidance
 
