@@ -248,6 +248,12 @@ Benchmark datasets are sourced from the [Stanford Large Network Dataset Collecti
 
 ---
 
+## Known Limitations / TODOs
+
+- **`top_k` parameter is hardcoded**: The `top_k` value used in the degree-based heuristic search (currently set to 120 in `src/lazymc.cpp`) is an arbitrary constant. Ideally, it should be determined dynamically based on the graph size and density.
+
+---
+
 ## References
 
 ```bibtex

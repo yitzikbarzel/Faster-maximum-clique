@@ -75,7 +75,6 @@ endif()
 # ---- Library ----
 add_library(lazymc STATIC
   src/bk.cpp
-  src/corness_based_heuristic.cpp
   src/degree_based_heuristic.cpp
   src/intersect_functions.cpp
   src/k_vertex_cover.cpp
