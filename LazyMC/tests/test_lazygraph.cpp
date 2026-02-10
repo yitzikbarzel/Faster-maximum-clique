@@ -1,15 +1,23 @@
 #include <gtest/gtest.h>
 #include "lazymc/lazygraph.h"
+#include "lazymc/incumbent.h"
 #include <algorithm>
 
 using lazymc::AdjList;
 using lazymc::LazyGraph;
 
+class LazyGraphTestFixture : public ::testing::Test {
+protected:
+    void SetUp() override {
+        lazymc::reset_incumbent();
+    }
+};
+
 // ------------------------------------------------------------
 // Test 1: Basic construction and simple mapping
 // ------------------------------------------------------------
 
-TEST(LazyGraphBasic, ConstructionAndAccessors) {
+TEST_F(LazyGraphTestFixture, ConstructionAndAccessors) {
     // Simple original graph:
     // 0: 1,2
     // 1: 0
@@ -85,7 +93,7 @@ TEST(LazyGraphBasic, ConstructionAndAccessors) {
 // Test 2: Non-trivial permutation and per-vertex containers
 // ------------------------------------------------------------
 
-TEST(LazyGraphBasic, PermutationMappingAndContainers) {
+TEST_F(LazyGraphTestFixture, PermutationMappingAndContainers) {
     // Original graph G:
     //
     // 0: 1,2
@@ -222,7 +230,7 @@ TEST(LazyGraphBasic, PermutationMappingAndContainers) {
 // Test 3: Isolated vertex and core_only checks
 // ------------------------------------------------------------
 
-TEST(LazyGraphBasic, IsolatedVertexAndCoreOnly) {
+TEST_F(LazyGraphTestFixture, IsolatedVertexAndCoreOnly) {
     // Graph with one isolated vertex:
     // 0: -
     AdjList G = {
@@ -257,7 +265,7 @@ TEST(LazyGraphBasic, IsolatedVertexAndCoreOnly) {
 // Test 4: Lazy construction – sorted triggers hashed build
 // ------------------------------------------------------------
 
-TEST(LazyGraphBasic, SortedBuildsFromHashedLazy) {
+TEST_F(LazyGraphTestFixture, SortedBuildsFromHashedLazy) {
     // Simple nontrivial graph
     // 0: 1
     // 1: 0,2
@@ -293,7 +301,7 @@ TEST(LazyGraphBasic, SortedBuildsFromHashedLazy) {
 // Test 5: Stability under multiple calls
 // ------------------------------------------------------------
 
-TEST(LazyGraphBasic, MultipleCallsStability) {
+TEST_F(LazyGraphTestFixture, MultipleCallsStability) {
     // Simple triangle:
     // 0: 1,2
     // 1: 0,2
