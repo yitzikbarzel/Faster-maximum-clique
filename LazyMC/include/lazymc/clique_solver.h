@@ -59,9 +59,9 @@ std::vector<int32_t> max_clique_bitset(const BitGraph& g,
                                        int32_t shared_offset = 0);
 
 // Same contract as max_clique_bitset, for a graph given as sorted adjacency
-// lists. Small graphs are solved directly with bitsets; larger ones are split
-// along a degeneracy order so that every bitset subproblem has at most
-// degeneracy+1 vertices.
+// lists. Graphs up to 32768 vertices are solved directly with bitsets; larger
+// ones are split along a degeneracy order so that every bitset subproblem has
+// at most degeneracy+1 vertices.
 std::vector<int32_t> max_clique_adj(const AdjList& g,
                                     int32_t lower_bound,
                                     const std::atomic<int32_t>* shared_size = nullptr,

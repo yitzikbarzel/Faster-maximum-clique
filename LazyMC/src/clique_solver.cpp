@@ -32,8 +32,11 @@ inline int ctz64(std::uint64_t x) {
 }
 
 // Graphs up to this many vertices are handed to the bitset solver directly
-// (8 MiB of adjacency bits at the limit). Larger ones are decomposed first.
-constexpr int32_t kDirectBitsetLimit = 8192;
+// (128 MiB of adjacency bits at the limit). Larger ones are decomposed first.
+// The decomposition rebuilds a subgraph per vertex, which is slow when the
+// degeneracy is high: on an R-MAT graph (scale 20) neighborhoods of 10k-18k
+// vertices took ~90 s CPU that way and ~6 s with direct bitset search.
+constexpr int32_t kDirectBitsetLimit = 32768;
 
 // Min-degree peeling (Batagelj–Zaversnik bin sort), O(n + m).
 // order[i] is the i-th peeled vertex; core[v] is v's core number.

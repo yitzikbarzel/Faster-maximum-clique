@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <random>
 #include <vector>
 
 #include "lazymc/kcore.h"
@@ -198,4 +199,36 @@ TEST(KCoreRobustness, SingleIsolatedVertex_Core0) {
     EXPECT_EQ(core[0], 0);
 
     ExpectCorePropertyHolds(G, core);
+}
+
+// ------------------------------------------------------------
+// KCoreAtLeast: exact core numbers inside the k-core, 0 elsewhere.
+// ------------------------------------------------------------
+
+TEST(KCoreAtLeast, MatchesFullDecompositionOnRandomGraphs) {
+    std::mt19937 rng(17);
+    for (int trial = 0; trial < 40; ++trial) {
+        const int n = 30 + 10 * trial;
+        const double p = 0.02 + 0.01 * (trial % 10);
+        AdjList G(static_cast<std::size_t>(n));
+        std::bernoulli_distribution edge(p);
+        for (int i = 0; i < n; ++i) {
+            for (int j = i + 1; j < n; ++j) {
+                if (edge(rng)) {
+                    G[static_cast<std::size_t>(i)].push_back(j);
+                    G[static_cast<std::size_t>(j)].push_back(i);
+                }
+            }
+        }
+
+        const auto full = KCore(G, /*min_degree=*/0);
+        for (int32_t k : {0, 1, 2, 3, 5, 8}) {
+            const auto partial = lazymc::KCoreAtLeast(G, k);
+            ASSERT_EQ(partial.size(), full.size());
+            for (std::size_t v = 0; v < full.size(); ++v) {
+                const int32_t expected = (k <= 0 || full[v] >= k) ? full[v] : 0;
+                EXPECT_EQ(partial[v], expected) << "trial=" << trial << " k=" << k << " v=" << v;
+            }
+        }
+    }
 }

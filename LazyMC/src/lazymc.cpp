@@ -60,9 +60,10 @@ std::vector<int32_t> run_lazymc(const AdjList& input, ProfilingResult* profile) 
         incumbent.try_update(degree_based_heuristic(G, kDegreeHeuristicTopK));
     });
 
-    // Step 4: KCore(G, |C*|)
+    // Step 4: KCore(G, |C*|). Only vertices of core >= |C*| can be in a
+    // larger clique; all others get core 0 and are skipped from here on.
     std::vector<int32_t> core;
-    stage("KCore", 1, [&]() { core = KCore(G, incumbent.size()); });
+    stage("KCore", 1, [&]() { core = KCoreAtLeast(G, incumbent.size()); });
 
     // Step 5: DetermineSortOrder(G, core)
     SortOrder order;

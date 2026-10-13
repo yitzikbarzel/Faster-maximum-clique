@@ -139,7 +139,7 @@ TEST(BitsetCliqueSolver, EmptyAndEdgelessGraphs) {
 TEST(AdjCliqueSolver, DecomposesLargeSparseGraphs) {
     // Larger than the direct bitset limit, so the degeneracy split is used.
     std::mt19937 rng(3);
-    const int n = 12000;
+    const int n = 40000;
     AdjList G(static_cast<std::size_t>(n));
     std::uniform_int_distribution<int> any(0, n - 1);
     for (int e = 0; e < 4 * n; ++e) {
