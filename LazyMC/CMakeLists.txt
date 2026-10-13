@@ -115,6 +115,9 @@ if(LAZYMC_BUILD_BENCH)
     src/pmc_adapter.cpp
   )
   target_link_libraries(bench_cli PRIVATE lazymc pmc_lib)
+
+  # Synthetic benchmark graphs (see README, "Reproducing the benchmarks")
+  add_executable(gen_graph bench/gen_graph.cpp)
 endif()
 
 # ---- Benchmarks ----

@@ -36,6 +36,39 @@ Benchmarked against [PMC](https://github.com/ryanrossi/pmc) (Parallel Maximum Cl
 | YouTube     | 1,157,827 | 2,987,624  | 17     | **2.30 s**  | 3.29 s  |
 | LiveJournal | 4,847,571 | 42,851,237 | 321    | **20.88 s** | 37.99 s |
 
+### Reproducing the benchmarks
+
+The table above was measured on SNAP / Network Repository graphs. The commands below regenerate a set of
+synthetic graphs (`gen_graph` is built together with `bench_cli`) and time LazyMC and PMC on them:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+G=./build/gen_graph
+$G road    2000000 1                                > road2M.txt
+$G chunglu 1000000 5 2.1 20000 5 30 0.6 0 2         > social1M.txt
+$G chunglu 2000000 16 2.2 40000 10 60 0.5 150 3     > social2M_planted150.txt
+$G chunglu 200000 10 2.3 3000 40 80 0.9 0 5         > dense_comm200k.txt
+$G rmat    20 16 4                                  > rmat20.txt
+$G gnp     150 0.9 6                                > gnp150_0.9.txt
+$G gnp     300 0.7 7                                > gnp300_0.7.txt
+$G gnp     400 0.99 12                              > gnp400_0.99.txt
+
+./build/bench_cli --input social1M.txt --solver all --profile
+```
+
+`time_ms` excludes reading the file. Measured on a 4-vCPU cloud VM (GCC 13, Release), median of 3 runs:
+
+| Graph | Vertices | Edges | Clique | LazyMC | PMC |
+| ----- | -------- | ----- | ------ | ------ | --- |
+| road2M | 1,999,396 | 2,936,741 | 4 | 0.30 s | 2.17 s |
+| social1M | 1,000,000 | 4,287,204 | 100 | 0.88 s | 9.21 s |
+| social2M_planted150 | 2,000,000 | 28,923,820 | 159 | 5.78 s | 95.9 s |
+| dense_comm200k | 200,000 | 5,795,168 | 78 | 1.48 s | 10.7 s |
+| rmat20 | 1,048,576 | 15,702,185 | 150 | 9.07 s | 56.0 s |
+| gnp300_0.7 | 300 | 31,442 | 20 | 0.59 s | 3.14 s |
+| gnp150_0.9 | 150 | 10,062 | 36 | 0.15 s | 0.53 s |
+| gnp400_0.99 | 400 | 79,054 | 196 | 0.47 s | > 900 s |
+
 ---
 
 ## Algorithm Pipeline
