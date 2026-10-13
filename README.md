@@ -21,7 +21,7 @@ LazyMC introduces four key optimization techniques over traditional branch-and-b
 | **Lazy Graph Construction**  | Neighborhoods are built on-demand, filtered by the incumbent clique size at construction time             |
 | **Multi-Stage Filtering**    | Three-pass filtering eliminates candidate vertices _before_ search, often ruling out entire neighborhoods |
 | **Early-Exit Intersections** | Set intersections abort early when the result cannot meet the required size threshold                     |
-| **Algorithmic Choice**       | Dense subgraphs are solved via k-Vertex Cover on the complement graph instead of direct MC search         |
+| **Algorithmic Choice**       | Very dense subgraphs are solved via minimum vertex cover on the complement instead of direct MC search    |
 
 ---
 
@@ -78,9 +78,11 @@ LazyMC/
 ├── include/lazymc/          # Public headers
 │   ├── lazymc.h             # Main API: LazyMC_run(), LazyMC_run_profiled()
 │   ├── lazygraph.h          # Lazy filtered hashed relabelled graph
-│   ├── incumbent.h          # Lock-free atomic incumbent management
-│   ├── bk.h                 # Bron-Kerbosch (MC solver for subproblems)
-│   ├── k_vertex_cover.h     # k-VC solver for dense subgraphs
+│   ├── incumbent.h          # Best clique so far, shared by the threads of one run
+│   ├── clique_solver.h      # Exact bitset branch-and-bound MC solver for subproblems
+│   ├── k_vertex_cover.h     # (Minimum) vertex cover solver for dense subgraphs
+│   ├── bk.h                 # Bron-Kerbosch enumeration (used by bk_cli)
+│   ├── normalize.h          # Input validation / cleanup
 │   ├── kcore.h              # K-core decomposition
 │   ├── intersect_functions.h # Early-exit set intersections
 │   ├── neighbor_search.h    # Per-vertex neighborhood search
@@ -89,7 +91,7 @@ LazyMC/
 │   ├── coreness_heuristic.h # Coreness-based heuristic (Algorithm 6)
 │   ├── profiling.h          # Profiling infrastructure
 │   └── ...
-├── src/                     # Implementation (~3,300 lines)
+├── src/                     # Implementation
 │   ├── lazymc.cpp           # Algorithm 1 orchestration
 │   ├── bench_cli.cpp        # Benchmarking CLI (LazyMC vs PMC)
 │   └── ...
@@ -182,6 +184,11 @@ lazymc::ProfilingResult result = lazymc::LazyMC_run_profiled(G);
 result.print_summary();
 ```
 
+Neighbor lists do not have to be sorted. Unsorted lists, duplicate edges, self-loops and
+out-of-range ids are cleaned up in a copy before the search; input that is already sorted
+and clean is used without copying. `LazyMC_run` keeps no global state, so independent calls
+(also concurrent ones) do not affect each other.
+
 ---
 
 ## Key Components
@@ -201,13 +208,20 @@ Thread-safe, lazily-constructed graph representation with:
 
 ### Algorithmic Choice (Section IV-E)
 
-Subgraphs with density above threshold phi are solved using **k-Vertex Cover** on the complement graph. For sparse subgraphs, a **Bron-Kerbosch** based MC solver with Tomita pivoting and graph coloring pruning is used.
+After filtering, the neighborhood is relabelled to a compact local graph. If it is dense (density above phi = 0.7)
+and its complement is very sparse (average complement degree <= 5), it is solved as a **minimum vertex cover** on the
+complement: the vertices outside a minimum cover form a maximum clique. Otherwise an exact **bitset branch-and-bound**
+clique solver with greedy-coloring bounds is used (it also finishes the job if the cover search runs out of steps).
+The extra condition on the complement was measured: on neighborhoods whose complement has average degree ~4 the
+cover search was ~200x faster than the clique solver, from ~6 upwards it was slower.
 
 ### Thread Safety
 
-- Lock-free incumbent updates via `std::atomic` CAS operations
-- `std::shared_ptr` with atomic load/store for clique snapshots
+- One `Incumbent` per run: an atomic size read lock-free for pruning, and the clique itself
+  behind a mutex (it is only written when it improves)
 - `std::once_flag` for lazy neighborhood initialization
+- Per-thread scratch buffers in the neighborhood search, so a search costs time proportional
+  to the neighborhood, not to the whole graph
 
 ---
 
@@ -221,16 +235,24 @@ cd build && ctest --output-on-failure
 
 # Run specific test
 ./tests/lazymc_tests --gtest_filter="BronKerbosch*"
+
+# Build and run the tests under ThreadSanitizer (also: address, undefined)
+cmake -B build-tsan -DLAZYMC_SANITIZE=thread -DLAZYMC_BUILD_BENCH=OFF
+cmake --build build-tsan && ctest --test-dir build-tsan --output-on-failure
 ```
+
+`-DLAZYMC_BUILD_BENCH=OFF` skips `bench_cli` and with it the PMC download.
 
 Test coverage includes:
 
 - Bron-Kerbosch correctness on known graphs
+- Exact clique solver and minimum vertex cover against a brute-force reference
 - K-core decomposition verification
 - Early-exit intersection correctness
 - LazyGraph lazy initialization
-- End-to-end algorithm correctness on random graphs
-- K-Vertex Cover solver
+- Neighborhood search (filters, dense and sparse paths) and systematic search
+- End-to-end correctness on random graphs from sparse to very dense, graphs with dense
+  communities, unnormalized input, and concurrent runs
 
 ---
 
