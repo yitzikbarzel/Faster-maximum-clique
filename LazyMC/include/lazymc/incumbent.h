@@ -2,54 +2,50 @@
 
 #include <atomic>
 #include <cstdint>
-#include <memory>
+#include <mutex>
 #include <vector>
 
 namespace lazymc {
 
-extern std::shared_ptr<const std::vector<int32_t>> g_incumbent_clique;
-extern std::atomic<int32_t> g_best_size;
+// The best clique found so far (C* in the paper), in G-labels.
+//
+// One Incumbent is shared by all stages and worker threads of a single
+// LazyMC run. size() is a lock-free read meant for pruning; the clique itself
+// is only written when it improves, which is rare, so a mutex is enough.
+class Incumbent {
+public:
+    Incumbent() = default;
+    Incumbent(const Incumbent&) = delete;
+    Incumbent& operator=(const Incumbent&) = delete;
 
-inline void reset_incumbent() {
-    std::atomic_store_explicit(
-        &g_incumbent_clique,
-        std::make_shared<const std::vector<int32_t>>(),
-        std::memory_order_release);
-    g_best_size.store(0, std::memory_order_relaxed);
-}
-
-inline void try_update_incumbent(std::vector<int32_t>&& candidate) {
-    auto new_ptr =
-        std::make_shared<const std::vector<int32_t>>(std::move(candidate));
-    const int32_t s = static_cast<int32_t>(new_ptr->size());
-
-    while (true) {
-        auto current =
-            std::atomic_load_explicit(&g_incumbent_clique,
-                                      std::memory_order_acquire);
-        const int32_t current_size =
-            current ? static_cast<int32_t>(current->size()) : 0;
-        if (s <= current_size) return;
-
-        if (std::atomic_compare_exchange_weak_explicit(
-                &g_incumbent_clique,
-                &current,
-                new_ptr,
-                std::memory_order_release,
-                std::memory_order_acquire)) {
-            g_best_size.store(s, std::memory_order_relaxed);
-            return;
-        }
+    int32_t size() const noexcept {
+        return size_.load(std::memory_order_acquire);
     }
-}
 
-inline void sync_incumbent_size() {
-    auto current =
-        std::atomic_load_explicit(&g_incumbent_clique,
-                                  std::memory_order_acquire);
-    const int32_t current_size =
-        current ? static_cast<int32_t>(current->size()) : 0;
-    g_best_size.store(current_size, std::memory_order_relaxed);
-}
+    // Replaces the incumbent if `candidate` is strictly larger.
+    // Returns true if the incumbent was replaced.
+    bool try_update(std::vector<int32_t> candidate) {
+        const auto s = static_cast<int32_t>(candidate.size());
+        if (s <= size()) return false;
+
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (s <= static_cast<int32_t>(clique_.size())) return false;
+        clique_ = std::move(candidate);
+        size_.store(s, std::memory_order_release);
+        return true;
+    }
+
+    std::vector<int32_t> clique() const {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return clique_;
+    }
+
+    const std::atomic<int32_t>& size_ref() const noexcept { return size_; }
+
+private:
+    std::atomic<int32_t> size_{0};
+    mutable std::mutex mtx_;
+    std::vector<int32_t> clique_;
+};
 
 } // namespace lazymc

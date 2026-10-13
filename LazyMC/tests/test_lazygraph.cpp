@@ -1,16 +1,11 @@
 #include <gtest/gtest.h>
 #include "lazymc/lazygraph.h"
-#include "lazymc/incumbent.h"
 #include <algorithm>
 
 using lazymc::AdjList;
 using lazymc::LazyGraph;
 
 class LazyGraphTestFixture : public ::testing::Test {
-protected:
-    void SetUp() override {
-        lazymc::reset_incumbent();
-    }
 };
 
 // ------------------------------------------------------------

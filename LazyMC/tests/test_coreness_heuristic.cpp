@@ -4,7 +4,6 @@
 #include "lazymc/determine_sort_order.h"
 #include "lazymc/lazygraph.h"
 #include "lazymc/coreness_heuristic.h"
-#include "lazymc/incumbent.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -19,10 +18,6 @@ using lazymc::LazyGraph;
 using lazymc::coreness_based_heuristic;
 
 class CorenessHeuristicTestFixture : public ::testing::Test {
-protected:
-    void SetUp() override {
-        lazymc::reset_incumbent();
-    }
 };
 
 static bool IsCliqueInG(const AdjList& G, const std::vector<int32_t>& C) {

@@ -4,7 +4,6 @@
 #include "lazymc/determine_sort_order.h"
 #include "lazymc/lazygraph.h"
 #include "lazymc/lazymc.h"
-#include "lazymc/incumbent.h"
 
 #include <unordered_set>
 #include <cstddef>
@@ -17,10 +16,6 @@ using lazymc::DetermineSortOrder;
 using lazymc::LazyGraph;
 
 class Algo1WiringTestFixture : public ::testing::Test {
-protected:
-    void SetUp() override {
-        lazymc::reset_incumbent();
-    }
 };
 
 TEST_F(Algo1WiringTestFixture, KCoreToOrderToLazyGraphMappingIsConsistent) {

@@ -1,168 +1,309 @@
 #include "lazymc/neighbor_search.h"
 
+#include "lazymc/clique_solver.h"
+#include "lazymc/incumbent.h"
 #include "lazymc/k_vertex_cover.h"
-#include "lazymc/intersect_functions.h"
-#include "lazymc/bk.h"
 #include "lazymc/lazygraph.h"
-#include "lazymc/kcore.h"
-
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <unordered_set>
+#include <cstdlib>
+#include <memory>
+#include <new>
 #include <vector>
 
-using lazymc::AdjMap;
-using lazymc::bron_kerbosch_maximum;
+namespace lazymc {
 
 namespace {
 
-using lazymc::AdjList;
-using lazymc::k_vertex_cover_adj;
-using lazymc::k_vertex_cover_res;
+// The vertex cover route only pays off when the complement of G[N] is very
+// sparse. Measured on G(n, p) neighborhoods: with an average complement
+// degree of ~4 it was ~200x faster than the bitset clique solver, with ~6 or
+// more it was slower (up to ~30x at ~15).
+constexpr double kMaxComplementDegreeForVertexCover = 5.0;
 
-// Run k-Vertex-Cover on the complement of the induced subgraph G[verts].
-k_vertex_cover_res k_vertex_cover_induced_complement(
-    const AdjList& G,
-    const std::vector<int32_t>& verts,
-    int32_t k
-) {
-    const std::size_t m = verts.size();
-    AdjList subG(m);
+// Step budget for the vertex cover solver. If it runs out, the bitset clique
+// solver finishes the job, so this only trades between two exact solvers.
+constexpr long long kVertexCoverStepLimit = 1'000'000;
 
-    std::vector<int32_t> old_to_new(G.size(), -1);
-    for (std::size_t i = 0; i < m; ++i) {
-        int32_t v = verts[i];
-        old_to_new[static_cast<std::size_t>(v)] = static_cast<int32_t>(i);
+struct FreeDeleter {
+    void operator()(void* p) const noexcept { std::free(p); }
+};
+
+// Per-thread scratch space, reused across calls so that a call costs
+// O(size of the neighborhood) instead of O(|V|).
+//
+// The arrays have one entry per vertex of H. They are allocated with calloc
+// / malloc rather than std::vector so that the pages of a large array are
+// only committed (and zeroed by the OS) when touched; a thread that sees a
+// few neighborhoods does not pay for zeroing the whole array.
+struct Scratch {
+    std::unique_ptr<uint32_t[], FreeDeleter> stamp; // stamp[u] == epoch <=> u is marked
+    std::unique_ptr<int32_t[], FreeDeleter> local;  // local id of a marked vertex
+    std::size_t capacity = 0;
+    uint32_t epoch = 0;
+
+    std::vector<int32_t> N;
+    std::vector<int32_t> tmp;
+
+    void ensure(std::size_t n) {
+        if (capacity >= n) return;
+        auto* st = static_cast<uint32_t*>(std::calloc(n, sizeof(uint32_t)));
+        auto* lo = static_cast<int32_t*>(std::malloc(n * sizeof(int32_t)));
+        if (!st || !lo) {
+            std::free(st);
+            std::free(lo);
+            throw std::bad_alloc();
+        }
+        stamp.reset(st);
+        local.reset(lo);
+        capacity = n;
+        epoch = 0;
     }
 
-    std::vector<std::uint8_t> is_neighbor(G.size(), 0);
-
-    for (std::size_t i = 0; i < m; ++i) {
-        int32_t v = verts[i];
-
-        for (int32_t u : G[static_cast<std::size_t>(v)]) {
-            if (u >= 0 && static_cast<std::size_t>(u) < G.size() &&
-                old_to_new[static_cast<std::size_t>(u)] != -1) {
-                is_neighbor[static_cast<std::size_t>(u)] = 1;
-            }
+    uint32_t next_epoch() {
+        if (++epoch == 0) {
+            std::fill(stamp.get(), stamp.get() + capacity, 0u);
+            epoch = 1;
         }
-
-        for (std::size_t j = i + 1; j < m; ++j) {
-            int32_t u = verts[j];
-            if (!is_neighbor[static_cast<std::size_t>(u)]) {
-                subG[i].push_back(static_cast<int32_t>(j));
-                subG[j].push_back(static_cast<int32_t>(i));
-            }
-        }
-
-        for (int32_t u : G[static_cast<std::size_t>(v)]) {
-            if (u >= 0 && static_cast<std::size_t>(u) < G.size() &&
-                old_to_new[static_cast<std::size_t>(u)] != -1) {
-                is_neighbor[static_cast<std::size_t>(u)] = 0;
-            }
-        }
+        return epoch;
     }
+};
 
-    return k_vertex_cover_adj(subG, k);
+Scratch& scratch_for(std::size_t n) {
+    thread_local Scratch s;
+    s.ensure(n);
+    return s;
 }
 
-// Build induced subgraph for {v} ∪ N and run MC search; return the clique (G-labeling).
-// initial_best_size: skip searching if we can't beat this size
-std::vector<int32_t> maximum_clique_induced(
-    const AdjList& G,
-    const std::vector<int32_t>& N,
-    int32_t v,
-    int32_t initial_best_size = 0
-) {
-    const std::size_t n_vertices = G.size();
-    if (v < 0 || static_cast<std::size_t>(v) >= n_vertices) return {};
+// The part of the sorted neighbor array Nu that can intersect a sorted set
+// whose elements lie in [lo, hi].
+inline std::pair<const int32_t*, const int32_t*>
+range_within(const std::vector<int32_t>& Nu, int32_t lo, int32_t hi) {
+    const int32_t* b = std::lower_bound(Nu.data(), Nu.data() + Nu.size(), lo);
+    const int32_t* e = std::upper_bound(b, Nu.data() + Nu.size(), hi);
+    return {b, e};
+}
 
-    std::vector<int32_t> subset;
-    subset.reserve(N.size() + 1);
-    subset.push_back(v);
+// True iff |Nu ∩ N| >= need, where N is marked with `epoch`.
+// Exits as soon as the answer is known (Algorithm 4).
+bool has_enough_common(const std::vector<int32_t>& Nu,
+                       const std::vector<int32_t>& N,
+                       const Scratch& s, uint32_t epoch, int32_t need) {
+    if (need <= 0) return true;
+    auto [b, e] = range_within(Nu, N.front(), N.back());
+    int32_t remaining = static_cast<int32_t>(e - b);
+    if (remaining < need) return false;
 
-    std::vector<std::uint8_t> in_subset(n_vertices, 0);
-    in_subset[static_cast<std::size_t>(v)] = 1;
-
-    for (int32_t u : N) {
-        if (u >= 0 && static_cast<std::size_t>(u) < n_vertices &&
-            !in_subset[static_cast<std::size_t>(u)]) {
-            in_subset[static_cast<std::size_t>(u)] = 1;
-            subset.push_back(u);
+    int32_t count = 0;
+    for (const int32_t* p = b; p != e; ++p, --remaining) {
+        if (s.stamp[static_cast<std::size_t>(*p)] == epoch) {
+            if (++count >= need) return true;
+        } else if (count + remaining - 1 < need) {
+            return false;
         }
     }
+    return false;
+}
 
-    // Build induced subgraph as AdjList for KCore
-    const std::size_t m = subset.size();
-    
-    // Map from G-vertex to local index
-    std::vector<int32_t> g_to_local(n_vertices, -1);
-    for (std::size_t i = 0; i < m; ++i) {
-        g_to_local[static_cast<std::size_t>(subset[i])] = static_cast<int32_t>(i);
+bool neighbor_search_impl(LazyGraph& H,
+                          int32_t vH,
+                          const std::vector<int32_t>& core_H,
+                          int32_t best,
+                          const std::atomic<int32_t>* shared_size,
+                          double phi,
+                          std::vector<int32_t>& out_clique_G) {
+    const auto nH = static_cast<int32_t>(H.num_vertices());
+    if (vH < 0 || vH >= nH) return false;
+
+    Scratch& s = scratch_for(static_cast<std::size_t>(nH));
+    std::vector<int32_t>& N = s.N;
+
+    // -----------------------
+    // Filter 1: N <- {u in N+(v) : c[u] >= |C*|}
+    // -----------------------
+    N.clear();
+    {
+        const auto& Nv = H.sorted_neighbors(vH);
+        for (auto it = std::upper_bound(Nv.begin(), Nv.end(), vH); it != Nv.end(); ++it) {
+            if (core_H[static_cast<std::size_t>(*it)] >= best) N.push_back(*it);
+        }
     }
-    
-    // Build local AdjList for KCore
-    AdjList localG(m);
-    for (std::size_t i = 0; i < m; ++i) {
-        int32_t x = subset[i];
-        const auto& nbrs = G[static_cast<std::size_t>(x)];
-        for (int32_t y : nbrs) {
-            if (y >= 0 && static_cast<std::size_t>(y) < n_vertices &&
-                in_subset[static_cast<std::size_t>(y)]) {
-                localG[i].push_back(g_to_local[static_cast<std::size_t>(y)]);
+    if (static_cast<int32_t>(N.size()) < best) return false;
+
+    // A vertex of a clique larger than |C*| that contains v has at least
+    // |C*| - 1 neighbors inside N.
+    const int32_t need = best - 1;
+
+    // -----------------------
+    // Filter 2 (Algorithm 4): keep u if |N(u) ∩ N| >= |C*| - 1
+    // -----------------------
+    if (need > 0) {
+        const uint32_t epoch = s.next_epoch();
+        for (int32_t u : N) s.stamp[static_cast<std::size_t>(u)] = epoch;
+
+        s.tmp.clear();
+        for (int32_t u : N) {
+            if (has_enough_common(H.sorted_neighbors(u), N, s, epoch, need)) {
+                s.tmp.push_back(u);
+            }
+        }
+        N.swap(s.tmp);
+        if (static_cast<int32_t>(N.size()) < best) return false;
+    }
+
+    // -----------------------
+    // Filter 3: build G[N] with local ids and peel it to its (|C*|-1)-core.
+    // This repeats Filter 2 until nothing changes.
+    // -----------------------
+    auto m = static_cast<int32_t>(N.size());
+    AdjList local_adj(static_cast<std::size_t>(m));
+    if (m > 0) {
+        const uint32_t epoch = s.next_epoch();
+        for (int32_t i = 0; i < m; ++i) {
+            s.stamp[static_cast<std::size_t>(N[static_cast<std::size_t>(i)])] = epoch;
+            s.local[static_cast<std::size_t>(N[static_cast<std::size_t>(i)])] = i;
+        }
+        for (int32_t i = 0; i < m; ++i) {
+            const auto& Nu = H.sorted_neighbors(N[static_cast<std::size_t>(i)]);
+            auto [b, e] = range_within(Nu, N.front(), N.back());
+            auto& out = local_adj[static_cast<std::size_t>(i)];
+            for (const int32_t* p = b; p != e; ++p) {
+                if (s.stamp[static_cast<std::size_t>(*p)] == epoch) {
+                    out.push_back(s.local[static_cast<std::size_t>(*p)]);
+                }
             }
         }
     }
-    
-    // Compute KCore on induced subgraph - prune vertices with core < initial_best_size
-    std::vector<int32_t> local_core = lazymc::KCore(localG, initial_best_size);
-    
-    // Filter subset: keep only vertices with core >= initial_best_size
-    std::vector<int32_t> filtered_subset;
-    filtered_subset.reserve(m);
-    for (std::size_t i = 0; i < m; ++i) {
-        if (local_core[i] >= initial_best_size) {
-            filtered_subset.push_back(subset[i]);
+
+    if (need > 0) {
+        std::vector<int32_t> deg(static_cast<std::size_t>(m));
+        std::vector<int32_t> queue;
+        std::vector<std::uint8_t> alive(static_cast<std::size_t>(m), 1);
+        for (int32_t i = 0; i < m; ++i) {
+            deg[static_cast<std::size_t>(i)] = static_cast<int32_t>(local_adj[static_cast<std::size_t>(i)].size());
+            if (deg[static_cast<std::size_t>(i)] < need) {
+                alive[static_cast<std::size_t>(i)] = 0;
+                queue.push_back(i);
+            }
         }
-    }
-        if (static_cast<int32_t>(filtered_subset.size()) <= initial_best_size) {
-        return {};
-    }
-    
-    // Rebuild in_subset for filtered vertices
-    std::fill(in_subset.begin(), in_subset.end(), 0);
-    for (int32_t x : filtered_subset) {
-    in_subset[static_cast<std::size_t>(x)] = 1;
-    }
-
-    // Build AdjMap for BK with filtered vertices
-    AdjMap subG;
-    for (int32_t x : filtered_subset) {
-        const auto& nbrs = G[static_cast<std::size_t>(x)];
-        std::vector<int32_t> subNbrs;
-        subNbrs.reserve(nbrs.size());
-
-        for (int32_t y : nbrs) {
-            if (y >= 0 && static_cast<std::size_t>(y) < n_vertices &&
-                in_subset[static_cast<std::size_t>(y)]) {
-                subNbrs.push_back(y);
+        for (std::size_t q = 0; q < queue.size(); ++q) {
+            for (int32_t j : local_adj[static_cast<std::size_t>(queue[q])]) {
+                if (alive[static_cast<std::size_t>(j)] && --deg[static_cast<std::size_t>(j)] < need) {
+                    alive[static_cast<std::size_t>(j)] = 0;
+                    queue.push_back(j);
+                }
             }
         }
 
-        // std::sort(subNbrs.begin(), subNbrs.end());
-        // subNbrs.erase(std::unique(subNbrs.begin(), subNbrs.end()), subNbrs.end());
-        subG[x] = std::move(subNbrs);
+        if (!queue.empty()) {
+            const int32_t m2 = m - static_cast<int32_t>(queue.size());
+            if (m2 < best) return false;
+
+            std::vector<int32_t> new_id(static_cast<std::size_t>(m), -1);
+            int32_t next = 0;
+            for (int32_t i = 0; i < m; ++i) {
+                if (alive[static_cast<std::size_t>(i)]) {
+                    new_id[static_cast<std::size_t>(i)] = next;
+                    N[static_cast<std::size_t>(next)] = N[static_cast<std::size_t>(i)];
+                    ++next;
+                }
+            }
+            N.resize(static_cast<std::size_t>(m2));
+
+            AdjList compact(static_cast<std::size_t>(m2));
+            for (int32_t i = 0; i < m; ++i) {
+                const int32_t ni = new_id[static_cast<std::size_t>(i)];
+                if (ni < 0) continue;
+                auto& out = compact[static_cast<std::size_t>(ni)];
+                for (int32_t j : local_adj[static_cast<std::size_t>(i)]) {
+                    const int32_t nj = new_id[static_cast<std::size_t>(j)];
+                    if (nj >= 0) out.push_back(nj);
+                }
+            }
+            local_adj.swap(compact);
+            m = m2;
+        }
     }
 
-        return bron_kerbosch_maximum(subG, initial_best_size); // returns vertices in G-labeling
+    const int32_t vG = H.to_original(vH);
+    auto emit = [&](const std::vector<int32_t>& clique_local) {
+        out_clique_G.clear();
+        out_clique_G.reserve(clique_local.size() + 1);
+        out_clique_G.push_back(vG);
+        for (int32_t i : clique_local) {
+            out_clique_G.push_back(H.to_original(N[static_cast<std::size_t>(i)]));
+        }
+        return true;
+    };
 
+    if (m == 0) {
+        // Only v itself is left.
+        if (best < 1) return emit({});
+        return false;
+    }
+
+    int64_t twice_edges = 0;
+    for (const auto& a : local_adj) twice_edges += static_cast<int64_t>(a.size());
+    const double density =
+        (m > 1) ? static_cast<double>(twice_edges) / (static_cast<double>(m) * (m - 1)) : 1.0;
+
+    // A clique in N with >= |C*| vertices, plus v, beats the incumbent.
+    int32_t lower_bound = best - 1;
+    std::vector<int32_t> vc_clique;
+
+    // -----------------------
+    // Dense: minimum vertex cover on the complement (Section IV-E).
+    // A vertex cover of size <= m - |C*| leaves a clique of size >= |C*|.
+    // -----------------------
+    const double complement_degree = (1.0 - density) * (m - 1);
+    if (density > phi && complement_degree <= kMaxComplementDegreeForVertexCover && best > 0) {
+        AdjList complement(static_cast<std::size_t>(m));
+        for (int32_t i = 0; i < m; ++i) {
+            const auto& a = local_adj[static_cast<std::size_t>(i)];
+            auto it = a.begin();
+            for (int32_t j = 0; j < m; ++j) {
+                while (it != a.end() && *it < j) ++it;
+                if (j != i && (it == a.end() || *it != j)) {
+                    complement[static_cast<std::size_t>(i)].push_back(j);
+                }
+            }
+        }
+
+        min_vertex_cover_res res =
+            min_vertex_cover_adj(complement, m - best, kVertexCoverStepLimit);
+
+        if (res.found) {
+            std::vector<std::uint8_t> in_cover(static_cast<std::size_t>(m), 0);
+            for (int32_t i : res.cover) in_cover[static_cast<std::size_t>(i)] = 1;
+            for (int32_t i = 0; i < m; ++i) {
+                if (!in_cover[static_cast<std::size_t>(i)]) vc_clique.push_back(i);
+            }
+        }
+
+        if (!res.aborted) {
+            // Exact answer: the complement of a minimum cover is a maximum clique.
+            if (!res.found) return false;
+            return emit(vc_clique);
+        }
+
+        // Out of steps: let the clique solver finish, starting from what
+        // the cover search already found.
+        lower_bound = std::max(lower_bound, static_cast<int32_t>(vc_clique.size()));
+    }
+
+    // -----------------------
+    // Sparse (or unfinished dense): exact clique search on G[N].
+    // -----------------------
+    std::vector<int32_t> clique = max_clique_adj(local_adj, lower_bound, shared_size, 1);
+    if (!clique.empty()) return emit(clique);
+    if (!vc_clique.empty()) return emit(vc_clique);
+    return false;
 }
 
 } // anonymous namespace
-
-namespace lazymc {
 
 bool NeighborSearch(LazyGraph& H,
                     int32_t vH,
@@ -170,151 +311,17 @@ bool NeighborSearch(LazyGraph& H,
                     int32_t incumbent_size,
                     double phi,
                     std::vector<int32_t>& out_clique_G) {
-    const int32_t nH = static_cast<int32_t>(H.num_vertices());
-    if (vH < 0 || vH >= nH) return false;
+    return neighbor_search_impl(H, vH, core_H, incumbent_size, nullptr, phi, out_clique_G);
+}
 
-    // Fixed threshold for this call.
-    const int32_t best = incumbent_size;
-
-    // -----------------------
-    // Filter 1
-    // N ← {u ∈ N^+(v) : c[u] ≥ |C*|}
-    // -----------------------
-    std::vector<int32_t> N; // H-labeling
-    const auto& Nv = H.sorted_neighbors(vH);
-    N.reserve(Nv.size());
-
-    for (int32_t uH : Nv) {
-        if (uH > vH && core_H[static_cast<std::size_t>(uH)] >= best) {
-            N.push_back(uH);
-        }
-    }
-    if (static_cast<int32_t>(N.size()) < best) return false;
-
-    // -----------------------
-    // Filter 2 (Algorithm 4)
-    // keep u if |N(u) ∩ N| > best - 2
-    // -----------------------
-    std::unordered_set<int32_t> N_set(N.begin(), N.end());
-    std::vector<int32_t> tempN;
-    tempN.reserve(N.size());
-
-    for (int32_t uH : N) {
-        const auto& Nu = H.sorted_neighbors(uH);
-        if (intersect_size_gt_bool(Nu, N_set, best - 2)) {
-            tempN.push_back(uH);
-        }
-    }
-
-    N = std::move(tempN);
-    if (static_cast<int32_t>(N.size()) < best) return false;
-
-    // -----------------------
-    // Filter 3 (Algorithm 3) -- PASS 1: keep only strong vertices
-    // -----------------------
-    N_set.clear();
-    N_set.insert(N.begin(), N.end());
-
-    std::vector<int32_t> tempN2;
-    tempN2.reserve(N.size());
-    std::vector<int32_t> tmp_intersection;
-
-    for (int32_t uH : N) {
-        const auto& Nu = H.sorted_neighbors(uH);
-        const int32_t d = intersect_gt(Nu, N_set, tmp_intersection, best - 2);
-        if (d > best - 2) {
-            tempN2.push_back(uH);
-        }
-    }
-
-    N = std::move(tempN2);
-    if (static_cast<int32_t>(N.size()) < best) return false;
-
-    // -----------------------
-    // PASS 2: recompute density based ONLY on final N
-    // -----------------------
-    N_set.clear();
-    N_set.insert(N.begin(), N.end());
-
-    int64_t count_edge = 0;
-    tmp_intersection.clear();
-
-    for (int32_t uH : N) {
-        const auto& Nu = H.sorted_neighbors(uH);
-        const int32_t d = intersect_gt(Nu, N_set, tmp_intersection, 0);
-        if (d > 0) count_edge += d;
-    }
-
-    const double denom = static_cast<double>(N.size()) * static_cast<double>(N.size() - 1);
-    const double density = (denom > 0.0) ? (static_cast<double>(count_edge) / denom) : 0.0;
-
-    // Convert N from H-labeling to G-labeling for kVC/BK code
-    std::vector<int32_t> N_G;
-    N_G.reserve(N.size());
-    for (int32_t uH : N) {
-        N_G.push_back(H.to_original(uH));
-    }
-
-    const int32_t vG = H.to_original(vH);
-    const AdjList& G = H.original_graph();
-
-    // -----------------------
-    // Dense → k-VertexCover on complement, else → MaximumCliqueSearch
-    // -----------------------
-    if (density > phi) {
-        const int32_t k = static_cast<int32_t>(N_G.size()) - best;
-
-        k_vertex_cover_res res = k_vertex_cover_induced_complement(G, N_G, k);
-
-        // Case 1: aborted → fallback to BK
-        if (res.aborted) {
-            std::vector<int32_t> clique = maximum_clique_induced(G, N_G, vG, best);
-            if (static_cast<int32_t>(clique.size()) > best) {
-                out_clique_G = std::move(clique);
-                return true;
-            }
-            return false;
-        }
-
-        // Case 2: finished and NO vertex cover → safe to conclude NO larger clique
-        if (!res.found) {
-            return false;
-        }
-
-        // Case 3: found vertex cover → clique is complement of cover inside N plus v
-        const int32_t m = static_cast<int32_t>(N_G.size());
-        std::vector<std::uint8_t> in_cover(static_cast<std::size_t>(m), 0);
-
-        for (int32_t idx : res.cover) {
-            if (idx >= 0 && idx < m) in_cover[static_cast<std::size_t>(idx)] = 1;
-        }
-
-        std::vector<int32_t> clique;
-        clique.reserve(static_cast<std::size_t>(m) + 1);
-        clique.push_back(vG);
-        for (int32_t i = 0; i < m; ++i) {
-            if (!in_cover[static_cast<std::size_t>(i)]) {
-                clique.push_back(N_G[static_cast<std::size_t>(i)]);
-            }
-        }
-
-        if (static_cast<int32_t>(clique.size()) > best) {
-            out_clique_G = std::move(clique);
-            return true;
-        }
-        return false;
-    }
-
-    // Not dense: BK fallback
-    {
-        std::vector<int32_t> clique = maximum_clique_induced(G, N_G, vG, best);
-        if (static_cast<int32_t>(clique.size()) > best) {
-            out_clique_G = std::move(clique);
-            return true;
-        }
-    }
-
-    return false;
+bool NeighborSearch(LazyGraph& H,
+                    int32_t vH,
+                    const std::vector<int32_t>& core_H,
+                    const Incumbent& incumbent,
+                    double phi,
+                    std::vector<int32_t>& out_clique_G) {
+    return neighbor_search_impl(H, vH, core_H, incumbent.size(), &incumbent.size_ref(),
+                                phi, out_clique_G);
 }
 
 } // namespace lazymc

@@ -8,21 +8,7 @@
 
 namespace lazymc {
 
-// Counts |N ∩ neighbors(w)| using marking.
-// mark[x] == stamp  <=>  x ∈ N
-inline int32_t count_marked_neighbors(
-    const std::vector<int32_t>& neighbors,
-    const std::vector<int32_t>& mark,
-    int32_t stamp)
-{
-    int32_t cnt = 0;
-    for (int32_t u : neighbors) {
-        if (mark[u] == stamp) {
-            ++cnt;
-        }
-    }
-    return cnt;
-}
+class Incumbent;
 
 // Original adjacency list: vertices labeled 0..n-1.
 using AdjList = std::vector<std::vector<int32_t>>;
@@ -32,10 +18,15 @@ public:
     using NeighborHash  = std::unordered_set<int32_t>;
     using NeighborArray = std::vector<int32_t>;
 
+    // If `incumbent` is given, neighborhoods are filtered when they are
+    // first built: neighbors u with core[u] < |C*| are dropped, since they
+    // cannot be part of a clique larger than C*. Without it nothing is
+    // filtered.
     LazyGraph(const AdjList& G,
               const std::vector<int32_t>& relabel_to_original,
               const std::vector<int32_t>& original_to_relabel,
-              const std::vector<int32_t>& core);
+              const std::vector<int32_t>& core,
+              const Incumbent* incumbent = nullptr);
 
     // once_flag is non-copyable/non-movable → disallow copy/move
     LazyGraph(const LazyGraph&) = delete;
@@ -54,7 +45,6 @@ public:
     int32_t to_relabelled(int32_t v_G) const;
 
     const std::vector<int32_t>& core_values() const noexcept;
-    int32_t clique_lower_bound() const noexcept; // if implemented elsewhere
 
     // ---------- lazy neighborhood access ----------
     NeighborHash& hashed_neighbors(int32_t v);
@@ -66,12 +56,14 @@ private:
 
 private:
     const AdjList* G_ = nullptr;
+    const Incumbent* incumbent_ = nullptr;
 
     std::vector<int32_t> relabel_to_original_;
     std::vector<int32_t> original_to_relabel_;
     std::vector<int32_t> core_;
 
-    std::vector<NeighborHash>  hashed_;
+    // Hash sets are allocated on first use only: most vertices never need one.
+    std::vector<std::unique_ptr<NeighborHash>> hashed_;
     std::vector<NeighborArray> sorted_;
 
     // Thread-safe lazy init flags (array, not vector)

@@ -3,6 +3,7 @@
 #include "lazymc/neighbor_search.h"
 #include "lazymc/lazygraph.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -29,11 +30,14 @@ static lazymc::LazyGraph MakeIdentityLazyGraph(const AdjList& G,
     return lazymc::LazyGraph(G, r2o, o2r, core_H);
 }
 
-static std::vector<int32_t> DummyCliqueOfSize(int32_t sz) {
-    std::vector<int32_t> c;
-    c.reserve(static_cast<std::size_t>(sz));
-    for (int32_t i = 0; i < sz; ++i) c.push_back(i);
-    return c;
+bool IsCliqueInG(const AdjList& G, const std::vector<int32_t>& C) {
+    for (std::size_t i = 0; i < C.size(); ++i) {
+        for (std::size_t j = i + 1; j < C.size(); ++j) {
+            const auto& nbrs = G[static_cast<std::size_t>(C[i])];
+            if (std::find(nbrs.begin(), nbrs.end(), C[j]) == nbrs.end()) return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -51,12 +55,10 @@ TEST(NeighborSearchFilter1, NoQualifiedNeighborsReturnsEarly) {
     std::vector<int32_t> core_H = {1, 1};
     auto H = MakeIdentityLazyGraph(G, core_H);
 
-    std::vector<int32_t> best_clique_G = DummyCliqueOfSize(2);
-    double phi = 0.5;
+    std::vector<int32_t> clique;
+    const double phi = 0.5;
 
-    NeighborSearch(H, /*vH=*/0, core_H, best_clique_G, phi);
-
-    EXPECT_EQ(best_clique_G.size(), 2u);
+    EXPECT_FALSE(NeighborSearch(H, /*vH=*/0, core_H, /*incumbent_size=*/2, phi, clique));
 }
 
 TEST(NeighborSearchFilter1, NTooSmallPrunesSearch) {
@@ -67,12 +69,10 @@ TEST(NeighborSearchFilter1, NTooSmallPrunesSearch) {
     std::vector<int32_t> core_H = {3, 3, 3};
     auto H = MakeIdentityLazyGraph(G, core_H);
 
-    std::vector<int32_t> best_clique_G = DummyCliqueOfSize(3);
-    double phi = 0.5;
+    std::vector<int32_t> clique;
+    const double phi = 0.5;
 
-    NeighborSearch(H, /*vH=*/1, core_H, best_clique_G, phi);
-
-    EXPECT_EQ(best_clique_G.size(), 3u);
+    EXPECT_FALSE(NeighborSearch(H, /*vH=*/1, core_H, /*incumbent_size=*/3, phi, clique));
 }
 
 // ---------------------------------------------------------------------------
@@ -91,12 +91,10 @@ TEST(NeighborSearchFilter2, RemovesVerticesWithSmallIntersection) {
     std::vector<int32_t> core_H = {3, 3, 3, 3};
     auto H = MakeIdentityLazyGraph(G, core_H);
 
-    std::vector<int32_t> best_clique_G = DummyCliqueOfSize(3);
-    double phi = 0.5;
+    std::vector<int32_t> clique;
+    const double phi = 0.5;
 
-    NeighborSearch(H, /*vH=*/0, core_H, best_clique_G, phi);
-
-    EXPECT_EQ(best_clique_G.size(), 3u);
+    EXPECT_FALSE(NeighborSearch(H, /*vH=*/0, core_H, /*incumbent_size=*/3, phi, clique));
 }
 
 TEST(NeighborSearchFilter2, KeepsVerticesWithLargeIntersection) {
@@ -111,12 +109,12 @@ TEST(NeighborSearchFilter2, KeepsVerticesWithLargeIntersection) {
     std::vector<int32_t> core_H = {3, 3, 3, 3};
     auto H = MakeIdentityLazyGraph(G, core_H);
 
-    std::vector<int32_t> best_clique_G = DummyCliqueOfSize(2);
-    double phi = 0.9;
+    std::vector<int32_t> clique;
+    const double phi = 0.9;
 
-    NeighborSearch(H, /*vH=*/0, core_H, best_clique_G, phi);
-
-    EXPECT_EQ(best_clique_G.size(), 4u);
+    ASSERT_TRUE(NeighborSearch(H, /*vH=*/0, core_H, /*incumbent_size=*/2, phi, clique));
+    EXPECT_EQ(clique.size(), 4u);
+    EXPECT_TRUE(IsCliqueInG(G, clique));
 }
 
 // ---------------------------------------------------------------------------
@@ -142,12 +140,12 @@ TEST(NeighborSearchFilter3, ShrinksNButKeepsEnoughVerticesAndFindsClique) {
     std::vector<int32_t> core_H(6, 10);
     auto H = MakeIdentityLazyGraph(G, core_H);
 
-    std::vector<int32_t> best_clique_G = DummyCliqueOfSize(3);
-    double phi = 0.5;
+    std::vector<int32_t> clique;
+    const double phi = 0.5;
 
-    NeighborSearch(H, /*vH=*/0, core_H, best_clique_G, phi);
-
-    EXPECT_EQ(best_clique_G.size(), 4u);
+    ASSERT_TRUE(NeighborSearch(H, /*vH=*/0, core_H, /*incumbent_size=*/3, phi, clique));
+    EXPECT_EQ(clique.size(), 4u);
+    EXPECT_TRUE(IsCliqueInG(G, clique));
 }
 
 TEST(NeighborSearchDensity, DenseCaseUsesKVertexCoverBranchAndFindsClique) {
@@ -162,12 +160,12 @@ TEST(NeighborSearchDensity, DenseCaseUsesKVertexCoverBranchAndFindsClique) {
     std::vector<int32_t> core_H = {3, 3, 3, 3};
     auto H = MakeIdentityLazyGraph(G, core_H);
 
-    std::vector<int32_t> best_clique_G = DummyCliqueOfSize(2);
-    double phi = 0.1;
+    std::vector<int32_t> clique;
+    const double phi = 0.1;
 
-    NeighborSearch(H, /*vH=*/0, core_H, best_clique_G, phi);
-
-    EXPECT_EQ(best_clique_G.size(), 4u);
+    ASSERT_TRUE(NeighborSearch(H, /*vH=*/0, core_H, /*incumbent_size=*/2, phi, clique));
+    EXPECT_EQ(clique.size(), 4u);
+    EXPECT_TRUE(IsCliqueInG(G, clique));
 }
 
 TEST(NeighborSearchDensity, SparseCaseUsesMaximumCliqueFallback) {
@@ -182,10 +180,70 @@ TEST(NeighborSearchDensity, SparseCaseUsesMaximumCliqueFallback) {
     std::vector<int32_t> core_H = {3, 3, 3, 3};
     auto H = MakeIdentityLazyGraph(G, core_H);
 
-    std::vector<int32_t> best_clique_G = DummyCliqueOfSize(2);
-    double phi = 0.9;
+    std::vector<int32_t> clique;
+    const double phi = 1.0; // no neighborhood is denser than 1.0
 
-    NeighborSearch(H, /*vH=*/0, core_H, best_clique_G, phi);
+    ASSERT_TRUE(NeighborSearch(H, /*vH=*/0, core_H, /*incumbent_size=*/2, phi, clique));
+    EXPECT_EQ(clique.size(), 4u);
+    EXPECT_TRUE(IsCliqueInG(G, clique));
+}
 
-    EXPECT_EQ(best_clique_G.size(), 4u);
+// ---------------------------------------------------------------------------
+// The dense path must return a *maximum* clique of the neighborhood, not just
+// any clique that beats the incumbent: a vertex is searched only once, so a
+// larger clique left behind here is never found later.
+//
+// N+(0) = {1..13}. In the complement of G[N]: 1 is adjacent to 2..5 and each
+// of 2..5 forms a triangle with two private vertices. The minimum vertex cover
+// of that complement has 8 vertices (two per triangle) and leaves the clique
+// {1, 6, 7, 8, 9}; taking vertex 1 first gives a cover of 9 and only a clique
+// of size 4. With vertex 0 the maximum clique therefore has 6 vertices.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+AdjList DenseNeighborhoodWithLeftoverClique() {
+    std::vector<std::vector<bool>> comp(14, std::vector<bool>(14, false));
+    auto add_comp = [&](int a, int b) { comp[a][b] = comp[b][a] = true; };
+    for (int i = 0; i < 4; ++i) {
+        const int u = 2 + i, p = 6 + i, q = 10 + i;
+        add_comp(1, u);
+        add_comp(u, p);
+        add_comp(u, q);
+        add_comp(p, q);
+    }
+
+    AdjList G(14);
+    for (int32_t u = 1; u < 14; ++u) add_undirected_edge(G, 0, u);
+    for (int32_t a = 1; a < 14; ++a) {
+        for (int32_t b = a + 1; b < 14; ++b) {
+            if (!comp[a][b]) add_undirected_edge(G, a, b);
+        }
+    }
+    return G;
+}
+
+} // namespace
+
+TEST(NeighborSearchDensity, DenseCaseFindsMaximumNotJustImprovingClique) {
+    const AdjList G = DenseNeighborhoodWithLeftoverClique();
+    std::vector<int32_t> core_H(G.size(), 20);
+
+    for (int32_t incumbent : {3, 4, 5}) {
+        auto H = MakeIdentityLazyGraph(G, core_H);
+        std::vector<int32_t> clique;
+        ASSERT_TRUE(NeighborSearch(H, /*vH=*/0, core_H, incumbent, /*phi=*/0.7, clique))
+            << "incumbent=" << incumbent;
+        EXPECT_EQ(clique.size(), 6u) << "incumbent=" << incumbent;
+        EXPECT_TRUE(IsCliqueInG(G, clique));
+    }
+}
+
+TEST(NeighborSearchDensity, NoImprovementWhenIncumbentIsAlreadyMaximum) {
+    const AdjList G = DenseNeighborhoodWithLeftoverClique();
+    std::vector<int32_t> core_H(G.size(), 20);
+    auto H = MakeIdentityLazyGraph(G, core_H);
+
+    std::vector<int32_t> clique;
+    EXPECT_FALSE(NeighborSearch(H, /*vH=*/0, core_H, /*incumbent_size=*/6, /*phi=*/0.7, clique));
 }
