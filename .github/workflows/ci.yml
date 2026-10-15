@@ -27,4 +27,32 @@ jobs:
 
       - name: Run tests (ctest)
         working-directory: LazyMC
-        run: ctest --test-dir build
+        run: ctest --test-dir build --output-on-failure
+
+  # The search is multi-threaded; ThreadSanitizer catches data races that
+  # plain test runs only hit by luck.
+  thread-sanitizer:
+    runs-on: [self-hosted, Linux]
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Configure CMake with ThreadSanitizer
+        working-directory: LazyMC
+        run: >
+          cmake -S . -B build-tsan
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=ON
+          -DLAZYMC_BUILD_BENCH=OFF
+          -DLAZYMC_SANITIZE=thread
+
+      - name: Build
+        working-directory: LazyMC
+        run: cmake --build build-tsan
+
+      - name: Run tests (ctest)
+        working-directory: LazyMC
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build-tsan --output-on-failure

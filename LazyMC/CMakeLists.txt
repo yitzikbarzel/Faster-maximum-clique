@@ -9,6 +9,8 @@ project(LazyMC LANGUAGES CXX)
 
 # ---- Options ----
 option(BUILD_TESTING "Build tests" ON)
+option(LAZYMC_BUILD_BENCH "Build bench_cli (fetches PMC as a baseline solver)" ON)
+set(LAZYMC_SANITIZE "" CACHE STRING "Sanitizer to build with: thread, address or undefined")
 
 # ---- Toolchain ----
 set(CMAKE_CXX_STANDARD 17)
@@ -20,67 +22,29 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# ---- External: PMC (baseline max-clique) ----
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+if(LAZYMC_SANITIZE)
+  add_compile_options(-fsanitize=${LAZYMC_SANITIZE} -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=${LAZYMC_SANITIZE})
+endif()
+
+find_package(Threads REQUIRED)
 include(FetchContent)
-
-FetchContent_Declare(
-  pmc
-  GIT_REPOSITORY https://github.com/ryanrossi/pmc.git
-  GIT_TAG        06594a0
-)
-
-FetchContent_GetProperties(pmc)
-if(NOT pmc_POPULATED)
-  FetchContent_Populate(pmc)
-endif()
-
-# Patch PMC for modern libstdc++ (g++ 15): disallow implicit ifstream -> bool conversion
-set(PMC_UTILS_CPP "${pmc_SOURCE_DIR}/pmc_utils.cpp")
-if(EXISTS "${PMC_UTILS_CPP}")
-  file(READ "${PMC_UTILS_CPP}" PMC_UTILS_TXT)
-
-  # Only patch if the old line exists (idempotent)
-  if(PMC_UTILS_TXT MATCHES "return[ \t]+ifile;")
-    string(REPLACE
-      "return ifile;"
-      "return static_cast<bool>(ifile);"
-      PMC_UTILS_TXT
-      "${PMC_UTILS_TXT}"
-    )
-    file(WRITE "${PMC_UTILS_CPP}" "${PMC_UTILS_TXT}")
-  endif()
-else()
-  message(FATAL_ERROR "PMC file not found for patching: ${PMC_UTILS_CPP}")
-endif()
-
-add_library(pmc_lib STATIC
-  ${pmc_SOURCE_DIR}/pmc_utils.cpp
-  ${pmc_SOURCE_DIR}/pmc_graph.cpp
-  ${pmc_SOURCE_DIR}/pmc_clique_utils.cpp
-  ${pmc_SOURCE_DIR}/pmc_heu.cpp
-  ${pmc_SOURCE_DIR}/pmc_maxclique.cpp
-  ${pmc_SOURCE_DIR}/pmcx_maxclique.cpp
-  ${pmc_SOURCE_DIR}/pmcx_maxclique_basic.cpp
-  ${pmc_SOURCE_DIR}/pmc_cores.cpp
-  ${pmc_SOURCE_DIR}/pmc_lib.cpp
-)
-
-target_include_directories(pmc_lib PUBLIC ${pmc_SOURCE_DIR})
-
-find_package(OpenMP)
-if(OpenMP_CXX_FOUND)
-  target_link_libraries(pmc_lib PUBLIC OpenMP::OpenMP_CXX)
-endif()
 
 # ---- Library ----
 add_library(lazymc STATIC
   src/bk.cpp
+  src/clique_solver.cpp
   src/degree_based_heuristic.cpp
   src/intersect_functions.cpp
   src/k_vertex_cover.cpp
   src/lazygraph.cpp
   src/lazymc.cpp
   src/neighbor_search.cpp
+  src/normalize.cpp
   src/systematic_search.cpp
   src/graph_processing.cpp
   src/kcore.cpp
@@ -89,16 +53,72 @@ add_library(lazymc STATIC
 )
 
 target_include_directories(lazymc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(lazymc PUBLIC Threads::Threads)
 
 # ---- CLI ----
 add_executable(lazymc_cli src/main.cpp)
 target_link_libraries(lazymc_cli PRIVATE lazymc)
 
-add_executable(bench_cli
-  src/bench_cli.cpp
-  src/pmc_adapter.cpp
-)
-target_link_libraries(bench_cli PRIVATE lazymc pmc_lib)
+# ---- External: PMC (baseline max-clique) + benchmark CLI ----
+if(LAZYMC_BUILD_BENCH)
+  FetchContent_Declare(
+    pmc
+    GIT_REPOSITORY https://github.com/ryanrossi/pmc.git
+    GIT_TAG        06594a0
+  )
+
+  FetchContent_GetProperties(pmc)
+  if(NOT pmc_POPULATED)
+    FetchContent_Populate(pmc)
+  endif()
+
+  # Patch PMC for modern libstdc++ (g++ 15): disallow implicit ifstream -> bool conversion
+  set(PMC_UTILS_CPP "${pmc_SOURCE_DIR}/pmc_utils.cpp")
+  if(EXISTS "${PMC_UTILS_CPP}")
+    file(READ "${PMC_UTILS_CPP}" PMC_UTILS_TXT)
+
+    # Only patch if the old line exists (idempotent)
+    if(PMC_UTILS_TXT MATCHES "return[ \t]+ifile;")
+      string(REPLACE
+        "return ifile;"
+        "return static_cast<bool>(ifile);"
+        PMC_UTILS_TXT
+        "${PMC_UTILS_TXT}"
+      )
+      file(WRITE "${PMC_UTILS_CPP}" "${PMC_UTILS_TXT}")
+    endif()
+  else()
+    message(FATAL_ERROR "PMC file not found for patching: ${PMC_UTILS_CPP}")
+  endif()
+
+  add_library(pmc_lib STATIC
+    ${pmc_SOURCE_DIR}/pmc_utils.cpp
+    ${pmc_SOURCE_DIR}/pmc_graph.cpp
+    ${pmc_SOURCE_DIR}/pmc_clique_utils.cpp
+    ${pmc_SOURCE_DIR}/pmc_heu.cpp
+    ${pmc_SOURCE_DIR}/pmc_maxclique.cpp
+    ${pmc_SOURCE_DIR}/pmcx_maxclique.cpp
+    ${pmc_SOURCE_DIR}/pmcx_maxclique_basic.cpp
+    ${pmc_SOURCE_DIR}/pmc_cores.cpp
+    ${pmc_SOURCE_DIR}/pmc_lib.cpp
+  )
+
+  target_include_directories(pmc_lib PUBLIC ${pmc_SOURCE_DIR})
+
+  find_package(OpenMP)
+  if(OpenMP_CXX_FOUND)
+    target_link_libraries(pmc_lib PUBLIC OpenMP::OpenMP_CXX)
+  endif()
+
+  add_executable(bench_cli
+    src/bench_cli.cpp
+    src/pmc_adapter.cpp
+  )
+  target_link_libraries(bench_cli PRIVATE lazymc pmc_lib)
+
+  # Synthetic benchmark graphs (see README, "Reproducing the benchmarks")
+  add_executable(gen_graph bench/gen_graph.cpp)
+endif()
 
 # ---- Benchmarks ----
 add_executable(bk_cli src/bk_cli.cpp)

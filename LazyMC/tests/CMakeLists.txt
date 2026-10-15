@@ -4,7 +4,8 @@ add_executable(lazymc_tests
   test_smoke.cpp
   test_graph_processing.cpp
   test_bk.cpp
- # test_neighbor_search.cpp
+  test_clique_solver.cpp
+  test_neighbor_search.cpp
   test_k_vertex_cover.cpp
   test_degree_heuristic.cpp
   test_intersect_functions.cpp
@@ -13,9 +14,8 @@ add_executable(lazymc_tests
   test_determine_sort_order.cpp
   test_algo1.cpp
   test_coreness_heuristic.cpp
-  #test_systematic_search.cpp
+  test_systematic_search.cpp
   test_lazymc_correctness_small_random.cpp
-
 )
 
 target_link_libraries(lazymc_tests

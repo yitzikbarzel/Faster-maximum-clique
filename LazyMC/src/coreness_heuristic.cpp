@@ -7,7 +7,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <shared_mutex>
 #include <thread>
 #include <unordered_set>
 #include <vector>
@@ -16,59 +15,13 @@ namespace lazymc {
 
 namespace {
 
-struct GlobalIncumbent {
-    std::atomic<int32_t> best_size;
-    mutable std::shared_mutex mtx;
-    std::vector<int32_t> best; // H-labeling
-
-    GlobalIncumbent() {
-        // initialize from global project incumbent
-        sync_incumbent_size();
-        best_size.store(g_best_size.load(std::memory_order_relaxed),
-                        std::memory_order_relaxed);
-    }
-
-    int32_t size() const noexcept {
-        return best_size.load(std::memory_order_relaxed);
-    }
-
-    void try_update(std::vector<int32_t>&& candidate_H,
-                    LazyGraph& H) {
-        const int32_t s = static_cast<int32_t>(candidate_H.size());
-        if (s <= size()) return;
-
-        std::unique_lock<std::shared_mutex> lock(mtx);
-        if (s <= static_cast<int32_t>(best.size())) return;
-
-        // update local (H-labeling)
-        best = candidate_H;
-        best_size.store(s, std::memory_order_relaxed);
-
-        // also update global project incumbent (G-labeling)
-        std::vector<int32_t> candidate_G;
-        candidate_G.reserve(candidate_H.size());
-        for (int32_t vH : candidate_H) {
-            candidate_G.push_back(H.to_original(vH));
-        }
-
-        try_update_incumbent(std::move(candidate_G));
-    }
-};
-
-
-static void run_candidate_core(
-    LazyGraph& H,
-    int32_t v,
-    GlobalIncumbent& global
-) {
+// Greedy clique growth from v (Algorithm 6, one start vertex).
+void run_candidate_core(LazyGraph& H, int32_t v, Incumbent& incumbent) {
     std::vector<int32_t> tmp;
 
     std::vector<int32_t> N;
     const auto& Nv = H.sorted_neighbors(v);
-    N.reserve(Nv.size());
-    for (int32_t u : Nv) {
-        if (u > v) N.push_back(u);
-    }
+    N.assign(std::upper_bound(Nv.begin(), Nv.end(), v), Nv.end());
 
     std::vector<int32_t> C;
     C.reserve(64);
@@ -77,9 +30,8 @@ static void run_candidate_core(
     while (!N.empty()) {
         const int32_t u = *std::max_element(N.begin(), N.end());
 
-        // θ = |C*| − |C|  (GLOBAL, dynamic)
-        const int32_t theta =
-            global.size() - static_cast<int32_t>(C.size());
+        // θ = |C*| − |C|  (global, grows as other threads find cliques)
+        const int32_t theta = incumbent.size() - static_cast<int32_t>(C.size());
 
         const auto& Bu = H.hashed_neighbors(u);
         const int32_t d = intersect_gt(N, Bu, tmp, theta);
@@ -94,46 +46,37 @@ static void run_candidate_core(
         N.erase(std::remove(N.begin(), N.end(), u), N.end());
     }
 
-    global.try_update(std::move(C), H);
+    if (static_cast<int32_t>(C.size()) <= incumbent.size()) return;
+    for (int32_t& x : C) x = H.to_original(x);
+    incumbent.try_update(std::move(C));
 }
-
 
 } // namespace
 
 // Parallel coreness-based heuristic search (Algorithm 6 style)
-std::vector<int32_t> coreness_based_heuristic(
-    LazyGraph& H,
-    const std::vector<int32_t>& core
-) {
+std::vector<int32_t> coreness_based_heuristic(LazyGraph& H,
+                                             const std::vector<int32_t>& core,
+                                             Incumbent& incumbent) {
     const int32_t n = static_cast<int32_t>(H.num_vertices());
-    if (n <= 0) return {};
+    if (n <= 0) return incumbent.clique();
 
-    // Compute max core value
+    // One start vertex per k: the lowest-numbered vertex with core[v] == k.
     int32_t max_core = 0;
     for (int32_t v = 0; v < n; ++v) {
+        max_core = std::max(max_core, core[static_cast<std::size_t>(v)]);
+    }
+    if (max_core <= 0) return incumbent.clique();
+
+    std::vector<int32_t> first(static_cast<std::size_t>(max_core) + 1, -1);
+    for (int32_t v = n; v-- > 0;) {
         const int32_t cv = core[static_cast<std::size_t>(v)];
-        if (cv > max_core) max_core = cv;
+        if (cv >= 1) first[static_cast<std::size_t>(cv)] = v;
     }
-    if (max_core <= 0) return {};
 
-    // Precompute one start vertex v per k: lowest-numbered vertex with core[v] == k
     std::vector<int32_t> starts;
-    starts.reserve(static_cast<std::size_t>(max_core));
-
     for (int32_t k = max_core; k >= 1; --k) {
-        int32_t v = -1;
-        for (int32_t i = 0; i < n; ++i) {
-            if (core[static_cast<std::size_t>(i)] == k) {
-                v = i;
-                break;
-            }
-        }
-        if (v >= 0) starts.push_back(v);
+        if (first[static_cast<std::size_t>(k)] >= 0) starts.push_back(first[static_cast<std::size_t>(k)]);
     }
-
-    if (starts.empty()) return {};
-
-    GlobalIncumbent global;
 
     const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
     const unsigned workers = std::min<unsigned>(hw, static_cast<unsigned>(starts.size()));
@@ -147,9 +90,7 @@ std::vector<int32_t> coreness_based_heuristic(
             while (true) {
                 const int32_t i = next.fetch_add(1, std::memory_order_relaxed);
                 if (i >= static_cast<int32_t>(starts.size())) break;
-
-                const int32_t v = starts[static_cast<std::size_t>(i)];
-                run_candidate_core(H, v, global);
+                run_candidate_core(H, starts[static_cast<std::size_t>(i)], incumbent);
             }
         });
     }
@@ -158,19 +99,13 @@ std::vector<int32_t> coreness_based_heuristic(
         th.join();
     }
 
-    // Convert best clique from H-labeling to G-labeling
-    std::vector<int32_t> best_H;
-    {
-        std::shared_lock<std::shared_mutex> lock(global.mtx);
-        best_H = global.best;
-    }
+    return incumbent.clique();
+}
 
-    std::vector<int32_t> best_G;
-    best_G.reserve(best_H.size());
-    for (int32_t vH : best_H) {
-        best_G.push_back(H.to_original(vH));
-    }
-    return best_G;
+std::vector<int32_t> coreness_based_heuristic(LazyGraph& H,
+                                             const std::vector<int32_t>& core) {
+    Incumbent incumbent;
+    return coreness_based_heuristic(H, core, incumbent);
 }
 
 } // namespace lazymc

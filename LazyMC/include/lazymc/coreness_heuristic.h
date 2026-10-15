@@ -7,8 +7,16 @@
 
 namespace lazymc {
 
+class Incumbent;
+
 // Coreness-based heuristic search (Algorithm 6 style).
-// Returns a clique as a list of vertices in G-labels.
+// Improvements are written to `incumbent`; returns the incumbent clique
+// afterwards, in G-labels.
+std::vector<int32_t> coreness_based_heuristic(LazyGraph& H,
+                                             const std::vector<int32_t>& core,
+                                             Incumbent& incumbent);
+
+// Same, starting from an empty incumbent.
 std::vector<int32_t> coreness_based_heuristic(LazyGraph& H,
                                              const std::vector<int32_t>& core);
 

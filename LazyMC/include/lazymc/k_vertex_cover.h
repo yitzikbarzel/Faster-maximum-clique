@@ -30,4 +30,22 @@ struct k_vertex_cover_res {
 //       The algorithm was aborted (for example, step limit exceeded or invalid input detected).
 k_vertex_cover_res k_vertex_cover_adj(const AdjList& G, int32_t k);
 
+// Result of a minimum vertex cover search.
+struct min_vertex_cover_res {
+    bool found = false;         // a cover of size <= k_max was found
+    bool optimal = false;       // `cover` is proven minimum (implies found)
+    bool aborted = false;       // step limit hit or invalid input
+    std::vector<int32_t> cover; // smallest cover found
+};
+
+// Finds a minimum vertex cover of G, provided one of size <= k_max exists.
+//
+//   - found && optimal:  `cover` is a minimum vertex cover.
+//   - !found && !aborted: proven that no cover of size <= k_max exists.
+//   - aborted: the step limit was hit; if `found`, `cover` is the best cover
+//     seen so far but it is not proven minimum.
+min_vertex_cover_res min_vertex_cover_adj(const AdjList& G,
+                                          int32_t k_max,
+                                          long long step_limit = 20'000'000);
+
 } // namespace lazymc

@@ -21,7 +21,7 @@ LazyMC introduces four key optimization techniques over traditional branch-and-b
 | **Lazy Graph Construction**  | Neighborhoods are built on-demand, filtered by the incumbent clique size at construction time             |
 | **Multi-Stage Filtering**    | Three-pass filtering eliminates candidate vertices _before_ search, often ruling out entire neighborhoods |
 | **Early-Exit Intersections** | Set intersections abort early when the result cannot meet the required size threshold                     |
-| **Algorithmic Choice**       | Dense subgraphs are solved via k-Vertex Cover on the complement graph instead of direct MC search         |
+| **Algorithmic Choice**       | Very dense subgraphs are solved via minimum vertex cover on the complement instead of direct MC search    |
 
 ---
 
@@ -35,6 +35,76 @@ Benchmarked against [PMC](https://github.com/ryanrossi/pmc) (Parallel Maximum Cl
 | Bio-HS-CX   | 4,413     | 108,818    | 86     | **0.05 s**  | 0.08 s  |
 | YouTube     | 1,157,827 | 2,987,624  | 17     | **2.30 s**  | 3.29 s  |
 | LiveJournal | 4,847,571 | 42,851,237 | 321    | **20.88 s** | 37.99 s |
+
+### Reproducing the benchmarks
+
+The table above was measured on SNAP / Network Repository graphs. The commands below regenerate a set of
+synthetic graphs (`gen_graph` is built together with `bench_cli`) and time LazyMC and PMC on them:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+G=./build/gen_graph
+$G road    2000000 1                                > road2M.txt
+$G chunglu 1000000 5 2.1 20000 5 30 0.6 0 2         > social1M.txt
+$G chunglu 2000000 16 2.2 40000 10 60 0.5 150 3     > social2M_planted150.txt
+$G chunglu 200000 10 2.3 3000 40 80 0.9 0 5         > dense_comm200k.txt
+$G rmat    20 16 4                                  > rmat20.txt
+$G gnp     150 0.9 6                                > gnp150_0.9.txt
+$G gnp     300 0.7 7                                > gnp300_0.7.txt
+$G gnp     400 0.99 12                              > gnp400_0.99.txt
+
+./build/bench_cli --input social1M.txt --solver all --profile
+```
+
+`time_ms` excludes reading the file. Measured on a 4-vCPU cloud VM (GCC 13, Release), median of 3 runs:
+
+| Graph | Vertices | Edges | Clique | LazyMC | PMC |
+| ----- | -------- | ----- | ------ | ------ | --- |
+| road2M | 1,999,396 | 2,936,741 | 4 | 0.30 s | 2.17 s |
+| social1M | 1,000,000 | 4,287,204 | 100 | 0.88 s | 9.21 s |
+| social2M_planted150 | 2,000,000 | 28,923,820 | 159 | 5.78 s | 95.9 s |
+| dense_comm200k | 200,000 | 5,795,168 | 78 | 1.48 s | 10.7 s |
+| rmat20 | 1,048,576 | 15,702,185 | 150 | 9.07 s | 56.0 s |
+| gnp300_0.7 | 300 | 31,442 | 20 | 0.59 s | 3.14 s |
+| gnp150_0.9 | 150 | 10,062 | 36 | 0.15 s | 0.53 s |
+| gnp400_0.99 | 400 | 79,054 | 196 | 0.47 s | > 900 s |
+
+### Before / after this change (repository datasets)
+
+LazyMC from `main` (`b7e689b`) compared with this branch, on the graphs in `LazyMC/tests/data` as they were
+on `main`. Both binaries come from the same `bench_cli.cpp`, which checks every returned clique
+(`valid=yes` in all runs). Measured on WSL2 Ubuntu 24.04, 4 cores, GCC 13.3, Release, with a 140 s timeout per run.
+`main` was run three times; the range is given in brackets.
+
+| Graph | Vertices | Edges | Clique | LazyMC `main` | LazyMC this PR | Speedup |
+| ----- | -------- | ----- | ------ | ------------- | -------------- | ------- |
+| vc_sample | 200 | 8,473 | 58 | 63 ms (63–65) | **2.7 ms** | ×23 |
+| hamming8-2 | 256 | 31,616 | 128 | 815 ms (673–1414) | **49 ms** | ×17 |
+| com-youtube | 1,157,828 | 2,987,624 | 17 | 2.89 s (2.85–2.98) | **0.39 s** | ×7.4 |
+| bio-HS-CX | 4,413 | 108,818 | 86 | 173 ms (171–246) | **24 ms** | ×7.3 |
+| roadNet-CA | 1,971,300 | 2,766,607 | 4 | 647 ms (647–849) | **338 ms** | ×1.9 |
+| test_profile | 10 | 15 | 4 | 1.0 ms | 0.7 ms | — |
+| MANN_a81 (`C1000.9.clq`) | 3,321 | 408,849 | — | > 140 s | > 140 s | — |
+| bio-human-gene2 | 14,340 | 9,027,024 | — | > 140 s | > 140 s | — |
+
+The same runs against PMC:
+
+| Graph | LazyMC this PR | PMC | Faster |
+| ----- | -------------- | --- | ------ |
+| com-youtube | 0.39 s | 3.82 s | LazyMC ×9.8 |
+| roadNet-CA | 338 ms | 2,022 ms | LazyMC ×6.0 |
+| bio-HS-CX | 24 ms | 95 ms | LazyMC ×4.0 |
+| vc_sample | 2.7 ms | 8.7 ms | LazyMC ×3.2 |
+| hamming8-2 | 49 ms | 16 ms | PMC ×3.0 |
+
+On `main`, PMC was faster than LazyMC on vc_sample, hamming8-2 and bio-HS-CX. MANN_a81 and bio-human-gene2
+time out for PMC as well.
+
+Notes on the inputs:
+- `com-youtube.ungraph.txt` declares `n = 1157827` in its header, but its largest vertex id is 1157827, so
+  `bench_cli` rejects it. It was run with the header corrected to `1157828`.
+- `sanr400_0.7.clq` on `main` actually contains hamming8-2 and `C1000.9.clq` contains MANN_a81.
+  `C2000.9.clq` and `c-fat200-5.clq` are HTML error pages and were skipped.
 
 ---
 
@@ -78,9 +148,11 @@ LazyMC/
 ├── include/lazymc/          # Public headers
 │   ├── lazymc.h             # Main API: LazyMC_run(), LazyMC_run_profiled()
 │   ├── lazygraph.h          # Lazy filtered hashed relabelled graph
-│   ├── incumbent.h          # Lock-free atomic incumbent management
-│   ├── bk.h                 # Bron-Kerbosch (MC solver for subproblems)
-│   ├── k_vertex_cover.h     # k-VC solver for dense subgraphs
+│   ├── incumbent.h          # Best clique so far, shared by the threads of one run
+│   ├── clique_solver.h      # Exact bitset branch-and-bound MC solver for subproblems
+│   ├── k_vertex_cover.h     # (Minimum) vertex cover solver for dense subgraphs
+│   ├── bk.h                 # Bron-Kerbosch enumeration (used by bk_cli)
+│   ├── normalize.h          # Input validation / cleanup
 │   ├── kcore.h              # K-core decomposition
 │   ├── intersect_functions.h # Early-exit set intersections
 │   ├── neighbor_search.h    # Per-vertex neighborhood search
@@ -89,7 +161,7 @@ LazyMC/
 │   ├── coreness_heuristic.h # Coreness-based heuristic (Algorithm 6)
 │   ├── profiling.h          # Profiling infrastructure
 │   └── ...
-├── src/                     # Implementation (~3,300 lines)
+├── src/                     # Implementation
 │   ├── lazymc.cpp           # Algorithm 1 orchestration
 │   ├── bench_cli.cpp        # Benchmarking CLI (LazyMC vs PMC)
 │   └── ...
@@ -182,6 +254,11 @@ lazymc::ProfilingResult result = lazymc::LazyMC_run_profiled(G);
 result.print_summary();
 ```
 
+Neighbor lists do not have to be sorted. Unsorted lists, duplicate edges, self-loops and
+out-of-range ids are cleaned up in a copy before the search; input that is already sorted
+and clean is used without copying. `LazyMC_run` keeps no global state, so independent calls
+(also concurrent ones) do not affect each other.
+
 ---
 
 ## Key Components
@@ -201,13 +278,20 @@ Thread-safe, lazily-constructed graph representation with:
 
 ### Algorithmic Choice (Section IV-E)
 
-Subgraphs with density above threshold phi are solved using **k-Vertex Cover** on the complement graph. For sparse subgraphs, a **Bron-Kerbosch** based MC solver with Tomita pivoting and graph coloring pruning is used.
+After filtering, the neighborhood is relabelled to a compact local graph. If it is dense (density above phi = 0.7)
+and its complement is very sparse (average complement degree <= 5), it is solved as a **minimum vertex cover** on the
+complement: the vertices outside a minimum cover form a maximum clique. Otherwise an exact **bitset branch-and-bound**
+clique solver with greedy-coloring bounds is used (it also finishes the job if the cover search runs out of steps).
+The extra condition on the complement was measured: on neighborhoods whose complement has average degree ~4 the
+cover search was ~200x faster than the clique solver, from ~6 upwards it was slower.
 
 ### Thread Safety
 
-- Lock-free incumbent updates via `std::atomic` CAS operations
-- `std::shared_ptr` with atomic load/store for clique snapshots
+- One `Incumbent` per run: an atomic size read lock-free for pruning, and the clique itself
+  behind a mutex (it is only written when it improves)
 - `std::once_flag` for lazy neighborhood initialization
+- Per-thread scratch buffers in the neighborhood search, so a search costs time proportional
+  to the neighborhood, not to the whole graph
 
 ---
 
@@ -221,16 +305,24 @@ cd build && ctest --output-on-failure
 
 # Run specific test
 ./tests/lazymc_tests --gtest_filter="BronKerbosch*"
+
+# Build and run the tests under ThreadSanitizer (also: address, undefined)
+cmake -B build-tsan -DLAZYMC_SANITIZE=thread -DLAZYMC_BUILD_BENCH=OFF
+cmake --build build-tsan && ctest --test-dir build-tsan --output-on-failure
 ```
+
+`-DLAZYMC_BUILD_BENCH=OFF` skips `bench_cli` and with it the PMC download.
 
 Test coverage includes:
 
 - Bron-Kerbosch correctness on known graphs
+- Exact clique solver and minimum vertex cover against a brute-force reference
 - K-core decomposition verification
 - Early-exit intersection correctness
 - LazyGraph lazy initialization
-- End-to-end algorithm correctness on random graphs
-- K-Vertex Cover solver
+- Neighborhood search (filters, dense and sparse paths) and systematic search
+- End-to-end correctness on random graphs from sparse to very dense, graphs with dense
+  communities, unnormalized input, and concurrent runs
 
 ---
 

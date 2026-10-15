@@ -1,8 +1,7 @@
 #pragma once
 
-#include <vector>
-#include <map>
 #include <unordered_map>
+#include <vector>
 
 
 namespace lazymc {
@@ -20,11 +19,12 @@ using AdjMap = std::unordered_map<int, std::vector<int>>;
 std::vector<std::vector<int>>
 bron_kerbosch_all(const AdjMap& G);
 
-/// Bron–Kerbosch-based search for a single maximum clique.
-/// - Input: same adjacency map as above.
-/// - initial_best_size: optional lower bound for pruning (skip branches that can't beat this size)
-/// - Output: one maximum clique (largest size found).
-///   If the graph is empty, returns an empty vector.
+/// Exact search for a single maximum clique.
+/// - Input: same adjacency map as above (neighbor lists need not be sorted).
+/// - initial_best_size: only cliques with more than this many vertices are
+///   searched for.
+/// - Output: a maximum clique if it has more than initial_best_size vertices,
+///   otherwise an empty vector.
 std::vector<int>
 bron_kerbosch_maximum(const AdjMap& G, int initial_best_size = 0);
 

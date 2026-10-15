@@ -5,7 +5,6 @@
 
 #include "lazymc/degree_heuristic.h"
 #include "lazymc/lazygraph.h"
-#include "lazymc/incumbent.h"
 
 namespace {
 
@@ -33,10 +32,6 @@ struct IdentityLazyGraph {
 } // namespace
 
 class DegreeHeuristicTestFixture : public ::testing::Test {
-protected:
-    void SetUp() override {
-        lazymc::reset_incumbent();
-    }
 };
 
 TEST(DegreeBasedHeuristicTest, EmptyGraph) {

@@ -13,8 +13,10 @@ namespace lazymc {
 LazyGraph::LazyGraph(const AdjList& G,
                      const std::vector<int32_t>& relabel_to_original,
                      const std::vector<int32_t>& original_to_relabel,
-                     const std::vector<int32_t>& core)
+                     const std::vector<int32_t>& core,
+                     const Incumbent* incumbent)
     : G_(&G),
+      incumbent_(incumbent),
       relabel_to_original_(relabel_to_original),
       original_to_relabel_(original_to_relabel),
       core_(core)
@@ -72,16 +74,11 @@ LazyGraph::NeighborHash& LazyGraph::hashed_neighbors(int32_t v) {
         build_hashed(v);
     });
 
-    return hashed_[idx];
+    return *hashed_[idx];
 }
 
 const LazyGraph::NeighborArray& LazyGraph::sorted_neighbors(int32_t v) {
     const std::size_t idx = static_cast<std::size_t>(v);
-
-    // build_hashed(v) must happen before build_sorted(v)
-    std::call_once(hashed_once_[idx], [this, v]() {
-        build_hashed(v);
-    });
 
     std::call_once(sorted_once_[idx], [this, v]() {
         build_sorted(v);
@@ -94,15 +91,18 @@ const LazyGraph::NeighborArray& LazyGraph::sorted_neighbors(int32_t v) {
 // Builders
 // ------------------------------------------------------------
 
-void LazyGraph::build_hashed(int32_t v) {
+// The sorted array is the primary representation and is built directly from
+// G; the hash set is derived from it on demand.
+void LazyGraph::build_sorted(int32_t v) {
     const std::size_t idx = static_cast<std::size_t>(v);
-
-    hashed_[idx].clear();
 
     const int32_t v_G = relabel_to_original_[idx];
     const auto& neighbors_G = (*G_)[static_cast<std::size_t>(v_G)];
-    const int32_t incumbent = g_best_size.load(std::memory_order_relaxed);
-    
+    const int32_t incumbent = incumbent_ ? incumbent_->size() : 0;
+
+    NeighborArray& out = sorted_[idx];
+    out.clear();
+    out.reserve(neighbors_G.size());
 
     for (int32_t u_G : neighbors_G) {
         const std::size_t u_idx = static_cast<std::size_t>(u_G);
@@ -110,21 +110,22 @@ void LazyGraph::build_hashed(int32_t v) {
             continue;
         }
 
-        int32_t u_H = original_to_relabel_[u_idx];
-        if (u_H >= 0 && core_[static_cast<std::size_t>(u_H)] >= incumbent) {
-            hashed_[idx].insert(u_H);
+        const int32_t u_H = original_to_relabel_[u_idx];
+        if (u_H >= 0 && u_H != v &&
+            core_[static_cast<std::size_t>(u_H)] >= incumbent) {
+            out.push_back(u_H);
         }
     }
+
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    out.shrink_to_fit();
 }
 
-void LazyGraph::build_sorted(int32_t v) {
-    const std::size_t idx = static_cast<std::size_t>(v);
-
-    sorted_[idx].clear();
-
-    // hashed_[idx] is guaranteed built before build_sorted runs
-    sorted_[idx].assign(hashed_[idx].begin(), hashed_[idx].end());
-    std::sort(sorted_[idx].begin(), sorted_[idx].end());
+void LazyGraph::build_hashed(int32_t v) {
+    const auto& sorted = sorted_neighbors(v);
+    hashed_[static_cast<std::size_t>(v)] =
+        std::make_unique<NeighborHash>(sorted.begin(), sorted.end());
 }
 
 } // namespace lazymc

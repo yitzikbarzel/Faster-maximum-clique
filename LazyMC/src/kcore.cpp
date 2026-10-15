@@ -128,4 +128,87 @@ std::vector<int32_t> KCore(const AdjList& G, int32_t min_degree) {
     return core;
 }
 
+std::vector<int32_t> KCoreAtLeast(const AdjList& G, int32_t k) {
+    if (k <= 0) return KCore(G, 0);
+
+    const auto n = static_cast<int32_t>(G.size());
+    std::vector<int32_t> core(static_cast<std::size_t>(n), 0);
+
+    // Candidates: degree >= k. Their degree counts only candidate neighbors.
+    std::vector<std::uint8_t> alive(static_cast<std::size_t>(n), 0);
+    for (int32_t v = 0; v < n; ++v) {
+        alive[static_cast<std::size_t>(v)] = G[static_cast<std::size_t>(v)].size() >= static_cast<std::size_t>(k);
+    }
+    std::vector<int32_t> deg(static_cast<std::size_t>(n), 0);
+    std::vector<int32_t> queue;
+    for (int32_t v = 0; v < n; ++v) {
+        if (!alive[static_cast<std::size_t>(v)]) continue;
+        int32_t d = 0;
+        for (int32_t u : G[static_cast<std::size_t>(v)]) d += alive[static_cast<std::size_t>(u)];
+        deg[static_cast<std::size_t>(v)] = d;
+        if (d < k) queue.push_back(v);
+    }
+
+    // Peel down to the k-core.
+    for (int32_t v : queue) alive[static_cast<std::size_t>(v)] = 0;
+    for (std::size_t q = 0; q < queue.size(); ++q) {
+        for (int32_t u : G[static_cast<std::size_t>(queue[q])]) {
+            if (alive[static_cast<std::size_t>(u)] && --deg[static_cast<std::size_t>(u)] < k) {
+                alive[static_cast<std::size_t>(u)] = 0;
+                queue.push_back(u);
+            }
+        }
+    }
+
+    // Bin-sort core decomposition (as in KCore) restricted to the k-core.
+    std::vector<int32_t> vert;
+    int32_t max_deg = 0;
+    for (int32_t v = 0; v < n; ++v) {
+        if (alive[static_cast<std::size_t>(v)]) {
+            vert.push_back(v);
+            max_deg = std::max(max_deg, deg[static_cast<std::size_t>(v)]);
+        }
+    }
+    if (vert.empty()) return core;
+
+    std::vector<int32_t> start(static_cast<std::size_t>(max_deg) + 2, 0);
+    for (int32_t v : vert) ++start[static_cast<std::size_t>(deg[static_cast<std::size_t>(v)]) + 1];
+    for (std::size_t d = 1; d < start.size(); ++d) start[d] += start[d - 1];
+
+    std::vector<int32_t> pos(static_cast<std::size_t>(n), 0);
+    {
+        std::vector<int32_t> cursor(start.begin(), start.end() - 1);
+        std::vector<int32_t> sorted(vert.size());
+        for (int32_t v : vert) {
+            const auto d = static_cast<std::size_t>(deg[static_cast<std::size_t>(v)]);
+            pos[static_cast<std::size_t>(v)] = cursor[d]++;
+            sorted[static_cast<std::size_t>(pos[static_cast<std::size_t>(v)])] = v;
+        }
+        vert.swap(sorted);
+    }
+
+    for (std::size_t i = 0; i < vert.size(); ++i) {
+        const int32_t v = vert[i];
+        const int32_t dv = deg[static_cast<std::size_t>(v)];
+        core[static_cast<std::size_t>(v)] = dv;
+        for (int32_t u : G[static_cast<std::size_t>(v)]) {
+            if (!alive[static_cast<std::size_t>(u)]) continue;
+            const int32_t du = deg[static_cast<std::size_t>(u)];
+            if (du <= dv) continue;
+            const int32_t pu = pos[static_cast<std::size_t>(u)];
+            const int32_t pw = start[static_cast<std::size_t>(du)];
+            const int32_t w = vert[static_cast<std::size_t>(pw)];
+            if (u != w) {
+                vert[static_cast<std::size_t>(pu)] = w;
+                vert[static_cast<std::size_t>(pw)] = u;
+                pos[static_cast<std::size_t>(u)] = pw;
+                pos[static_cast<std::size_t>(w)] = pu;
+            }
+            ++start[static_cast<std::size_t>(du)];
+            deg[static_cast<std::size_t>(u)] = du - 1;
+        }
+    }
+    return core;
+}
+
 } // namespace lazymc

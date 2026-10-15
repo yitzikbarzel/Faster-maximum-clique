@@ -11,109 +11,10 @@ using lazymc::AdjList;
 
 constexpr long long VC_STEP_LIMIT = 20'000'000;
 
-// Internal state for recursion.
-struct VCState {
-    const AdjList* G = nullptr;              // Pointer to original graph
-    std::vector<std::uint8_t> active;        // 1 = vertex is still present, 0 = removed
-    std::vector<int32_t> degree;             // Degree in the active graph
-    int32_t k = 0;                           // Remaining allowed vertices in the cover
-    std::vector<int32_t> cover;              // Vertices chosen so far
-};
-
-// ---------- basic helpers ----------
-
-inline bool is_active(const VCState& state, int32_t v) {
-    return v >= 0 &&
-           v < static_cast<int32_t>(state.active.size()) &&
-           state.active[static_cast<std::size_t>(v)] != 0;
-}
-
-inline int32_t degree_active(const VCState& state, int32_t v) {
-    if (!is_active(state, v)) {
-        return 0;
-    }
-    return state.degree[static_cast<std::size_t>(v)];
-}
-
-// Take a single vertex v into the cover, update k, active, and degrees.
-// Returns false if k drops below 0 (prune).
-bool take_vertex_into_cover(VCState& state, int32_t v) {
-    if (!is_active(state, v)) {
-        // Vertex already inactive: nothing to do
-        return true;
-    }
-
-    state.cover.push_back(v);
-    --state.k;
-    if (state.k < 0) {
-        return false;
-    }
-
-    state.active[static_cast<std::size_t>(v)] = 0;
-    state.degree[static_cast<std::size_t>(v)] = 0;
-
-    const auto& nbrs = (*state.G)[static_cast<std::size_t>(v)];
-    for (int32_t u : nbrs) {
-        if (is_active(state, u)) {
-            auto idx = static_cast<std::size_t>(u);
-            if (state.degree[idx] > 0) {
-                --state.degree[idx];
-            }
-        }
-    }
-
-    return true;
-}
-
-// Take a set of vertices into the cover at once.
-// Only vertices that are still active are actually taken.
-// Returns false if k < 0.
-bool take_vertices_into_cover(VCState& state, const std::vector<int32_t>& verts) {
-    for (int32_t v : verts) {
-        if (!is_active(state, v)) {
-            continue; // Vertex already removed, skip
-        }
-        state.cover.push_back(v);
-        --state.k;
-        if (state.k < 0) {
-            return false;
-        }
-
-        state.active[static_cast<std::size_t>(v)] = 0;
-        state.degree[static_cast<std::size_t>(v)] = 0;
-
-        const auto& nbrs = (*state.G)[static_cast<std::size_t>(v)];
-        for (int32_t u : nbrs) {
-            if (is_active(state, u)) {
-                auto idx = static_cast<std::size_t>(u);
-                if (state.degree[idx] > 0) {
-                    --state.degree[idx];
-                }
-            }
-        }
-    }
-    return true;
-}
-
-// Check if the active graph still has at least one edge.
-bool graph_has_edges(const VCState& state) {
-    const int32_t n = static_cast<int32_t>(state.active.size());
-    for (int32_t v = 0; v < n; ++v) {
-        if (!is_active(state, v)) {
-            continue;
-        }
-        if (degree_active(state, v) > 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // Validate that all neighbors in the adjacency lists are within [0, n).
-inline bool validate_graph_indices(const AdjList& G) {
-    const int32_t n = static_cast<int32_t>(G.size());
-    for (int32_t v = 0; v < n; ++v) {
-        const auto& nbrs = G[static_cast<std::size_t>(v)];
+bool validate_graph_indices(const AdjList& G) {
+    const auto n = static_cast<int32_t>(G.size());
+    for (const auto& nbrs : G) {
         for (int32_t u : nbrs) {
             if (u < 0 || u >= n) {
                 return false;
@@ -123,260 +24,227 @@ inline bool validate_graph_indices(const AdjList& G) {
     return true;
 }
 
-// Greedy matching to get a lower bound on the vertex cover size.
-// For any matching of size M, vc(G) >= M.
-// If this bound exceeds k, we can safely prune.
-int32_t greedy_matching_lower_bound(const AdjList& G,
-                                    const std::vector<std::uint8_t>& active,
-                                    int32_t k_for_prune) {
-    const int32_t n = static_cast<int32_t>(G.size());
-    std::vector<std::uint8_t> used(static_cast<std::size_t>(n), 0);
-    int32_t match_count = 0;
-
-    for (int32_t v = 0; v < n; ++v) {
-        if (!active[static_cast<std::size_t>(v)] ||
-            used[static_cast<std::size_t>(v)]) {
-            continue;
-        }
-        const auto& nbrs = G[static_cast<std::size_t>(v)];
-        for (int32_t u : nbrs) {
-            if (!active[static_cast<std::size_t>(u)] ||
-                used[static_cast<std::size_t>(u)]) {
-                continue;
-            }
-            // Match (v, u)
-            used[static_cast<std::size_t>(v)] = 1;
-            used[static_cast<std::size_t>(u)] = 1;
-            ++match_count;
-            if (match_count > k_for_prune) {
-                // We only need to know that the lower bound exceeds k
-                return match_count;
-            }
-            break;
+// Branch and bound for vertex cover.
+//
+// Looks for covers of size <= limit_. Every time one is found it is recorded
+// and limit_ drops to its size - 1, so the search ends with a minimum cover
+// (unless stop_at_first_ is set, which answers the plain k-VC question).
+//
+// State changes are recorded on a trail and undone on backtrack, so a search
+// node costs O(n + m) rather than a copy of the whole state.
+class VCSearch {
+public:
+    VCSearch(const AdjList& G, int32_t limit, bool stop_at_first, long long step_limit)
+        : G_(G),
+          n_(static_cast<int32_t>(G.size())),
+          active_(static_cast<std::size_t>(n_), 1),
+          deg_(static_cast<std::size_t>(n_), 0),
+          matched_(static_cast<std::size_t>(n_), 0),
+          limit_(limit),
+          stop_at_first_(stop_at_first),
+          step_limit_(step_limit) {
+        for (int32_t v = 0; v < n_; ++v) {
+            deg_[static_cast<std::size_t>(v)] = static_cast<int32_t>(G_[static_cast<std::size_t>(v)].size());
+            edges2_ += deg_[static_cast<std::size_t>(v)];
+            work_.push_back(v);
         }
     }
 
-    return match_count;
-}
+    void run() { search(); }
 
-// ---------- kernelization ----------
-//
-//  - Remove isolated vertices (deg = 0).
-//  - Degree-1 rule: if deg(u) = 1 with neighbor v, then v must be in any cover.
-//  - High-degree rule: if deg(v) > k, v must be in any k-vertex-cover.
-//
-// Runs until no rule applies or k < 0.
-bool kernelize(VCState& state) {
-    const int32_t n = static_cast<int32_t>(state.active.size());
+    bool found() const { return found_; }
+    bool aborted() const { return aborted_; }
+    std::vector<int32_t>& best() { return best_; }
 
-    while (true) {
-        if (state.k < 0) {
-            return false;
-        }
+private:
+    int32_t budget() const { return limit_ - static_cast<int32_t>(cover_.size()); }
 
-        bool changed = false;
-
-        // 1. Remove isolated vertices (deg = 0).
-        for (int32_t v = 0; v < n; ++v) {
-            if (!is_active(state, v)) {
-                continue;
-            }
-            if (degree_active(state, v) == 0) {
-                state.active[static_cast<std::size_t>(v)] = 0;
-                state.degree[static_cast<std::size_t>(v)] = 0;
-                changed = true;
+    void remove(int32_t v, bool into_cover) {
+        active_[static_cast<std::size_t>(v)] = 0;
+        if (into_cover) cover_.push_back(v);
+        trail_.push_back(into_cover ? ~v : v);
+        for (int32_t u : G_[static_cast<std::size_t>(v)]) {
+            if (active_[static_cast<std::size_t>(u)]) {
+                --deg_[static_cast<std::size_t>(u)];
+                edges2_ -= 2;
+                work_.push_back(u);
             }
         }
-        if (state.k < 0) {
-            return false;
-        }
-        if (changed) {
-            continue;
-        }
+    }
 
-        // 2. Degree-1 rule: if u has exactly one active neighbor v, we must take v.
-        for (int32_t u = 0; u < n; ++u) {
-            if (!is_active(state, u)) {
-                continue;
-            }
-            if (degree_active(state, u) == 1) {
-                int32_t only_neighbor = -1;
-                const auto& nbrs = (*state.G)[static_cast<std::size_t>(u)];
-                for (int32_t v : nbrs) {
-                    if (is_active(state, v)) {
-                        only_neighbor = v;
-                        break;
-                    }
+    void undo_to(std::size_t mark) {
+        while (trail_.size() > mark) {
+            const int32_t e = trail_.back();
+            trail_.pop_back();
+            const bool in_cover = e < 0;
+            const int32_t v = in_cover ? ~e : e;
+            if (in_cover) cover_.pop_back();
+            for (int32_t u : G_[static_cast<std::size_t>(v)]) {
+                if (active_[static_cast<std::size_t>(u)]) {
+                    ++deg_[static_cast<std::size_t>(u)];
+                    edges2_ += 2;
                 }
-                if (only_neighbor >= 0) {
-                    if (!take_vertex_into_cover(state, only_neighbor)) {
-                        return false;
+            }
+            active_[static_cast<std::size_t>(v)] = 1;
+        }
+    }
+
+    // Reductions that never make the optimum worse:
+    //  - deg 0: drop the vertex.
+    //  - deg 1: its neighbor can be taken into the cover.
+    //  - deg > remaining budget: the vertex must be in any cover within budget.
+    // Returns false if the budget is exceeded.
+    bool kernelize() {
+        while (true) {
+            while (!work_.empty()) {
+                const int32_t v = work_.back();
+                work_.pop_back();
+                if (!active_[static_cast<std::size_t>(v)]) continue;
+                if (budget() < 0) return false;
+
+                const int32_t d = deg_[static_cast<std::size_t>(v)];
+                if (d == 0) {
+                    remove(v, false);
+                } else if (d == 1) {
+                    for (int32_t u : G_[static_cast<std::size_t>(v)]) {
+                        if (active_[static_cast<std::size_t>(u)]) {
+                            remove(u, true);
+                            break;
+                        }
                     }
+                } else if (d > budget()) {
+                    remove(v, true);
+                }
+            }
+            if (budget() < 0) return false;
+
+            // The budget shrank, so the high-degree rule may now apply to
+            // vertices that are not on the worklist.
+            bool changed = false;
+            for (int32_t v = 0; v < n_; ++v) {
+                if (active_[static_cast<std::size_t>(v)] &&
+                    deg_[static_cast<std::size_t>(v)] > budget()) {
+                    remove(v, true);
                     changed = true;
-                    break; // Restart kernelization loop
+                    if (budget() < 0) return false;
+                }
+            }
+            if (!changed) return true;
+        }
+    }
+
+    // Size of a greedy maximal matching: a lower bound on any cover.
+    int32_t matching_lower_bound() {
+        ++stamp_;
+        if (stamp_ == 0) {
+            std::fill(matched_.begin(), matched_.end(), 0);
+            stamp_ = 1;
+        }
+        int32_t size = 0;
+        for (int32_t v = 0; v < n_; ++v) {
+            if (!active_[static_cast<std::size_t>(v)] || matched_[static_cast<std::size_t>(v)] == stamp_) continue;
+            for (int32_t u : G_[static_cast<std::size_t>(v)]) {
+                if (active_[static_cast<std::size_t>(u)] && matched_[static_cast<std::size_t>(u)] != stamp_) {
+                    matched_[static_cast<std::size_t>(v)] = stamp_;
+                    matched_[static_cast<std::size_t>(u)] = stamp_;
+                    ++size;
+                    break;
                 }
             }
         }
-        if (changed) {
-            continue;
+        return size;
+    }
+
+    void search() {
+        if (done_ || aborted_) return;
+        if (++steps_ > step_limit_) {
+            aborted_ = true;
+            return;
         }
 
-        // 3. High-degree rule: if deg(v) > k, then v must be in every k-vertex-cover.
-        for (int32_t v = 0; v < n; ++v) {
-            if (!is_active(state, v)) {
-                continue;
-            }
-            const int32_t deg_v = degree_active(state, v);
-            if (deg_v > state.k) {
-                if (!take_vertex_into_cover(state, v)) {
-                    return false;
-                }
-                changed = true;
-                break; // Restart kernelization loop
-            }
+        const std::size_t mark = trail_.size();
+        const bool ok = kernelize();
+        work_.clear();
+        if (!ok) {
+            undo_to(mark);
+            return;
         }
 
-        if (!changed) {
-            break; // No more rules apply
+        if (edges2_ == 0) {
+            best_ = cover_;
+            found_ = true;
+            limit_ = static_cast<int32_t>(cover_.size()) - 1;
+            if (stop_at_first_) done_ = true;
+            undo_to(mark);
+            return;
         }
-    }
 
-    return state.k >= 0;
-}
-
-// Pick a vertex of maximum degree among active vertices.
-// Returns false if there are no active vertices with degree > 0.
-bool pick_high_degree_vertex(const VCState& state, int32_t& v_out) {
-    const int32_t n = static_cast<int32_t>(state.active.size());
-
-    int32_t best_v = -1;
-    int32_t best_deg = -1;
-
-    for (int32_t v = 0; v < n; ++v) {
-        if (!is_active(state, v)) {
-            continue;
-        }
-        int32_t d = degree_active(state, v);
-        if (d > best_deg) {
-            best_deg = d;
-            best_v = v;
-        }
-    }
-
-    if (best_v < 0 || best_deg <= 0) {
-        return false;
-    }
-
-    v_out = best_v;
-    return true;
-}
-
-// ---------- main recursive solver ----------
-//
-// Branching rule (stronger):
-//   Choose v of maximum degree.
-//   - Branch A: put v into the cover (k <- k - 1).
-//   - Branch B: put all neighbors of v into the cover (k <- k - deg(v)).
-//
-// In addition, we keep a global step counter, and if it
-// exceeds VC_STEP_LIMIT, we set 'aborted = true' and stop.
-//
-bool solve(VCState& state,
-           long long& steps,
-           long long step_limit,
-           bool& aborted)
-{
-    // Global step limit check
-    if (steps > step_limit) {
-        aborted = true;
-        return false;
-    }
-    ++steps;
-
-    // 1. Kernelization.
-    if (!kernelize(state)) {
-        return false; // Exceeded k during reductions
-    }
-
-    // Check step limit again after kernelization
-    if (steps > step_limit) {
-        aborted = true;
-        return false;
-    }
-
-    // 2. If no edges remain, current cover is valid.
-    if (!graph_has_edges(state)) {
-        return true;
-    }
-
-    // 3. Lower bound using greedy matching.
-    {
-        int32_t lb = greedy_matching_lower_bound(*state.G, state.active, state.k);
-        if (lb > state.k) {
-            return false;
-        }
-    }
-
-    // 4. Pick high-degree vertex v.
-    int32_t v = -1;
-    if (!pick_high_degree_vertex(state, v)) {
-        // No active edges
-        return true;
-    }
-
-    // Collect active neighbors of v (this is N(v) in the current subproblem).
-    std::vector<int32_t> neighbors;
-    {
-        const auto& nbrs = (*state.G)[static_cast<std::size_t>(v)];
-        neighbors.reserve(nbrs.size());
-        for (int32_t u : nbrs) {
-            if (is_active(state, u)) {
-                neighbors.push_back(u);
+        int32_t v = -1;
+        int32_t max_deg = 0;
+        for (int32_t u = 0; u < n_; ++u) {
+            if (active_[static_cast<std::size_t>(u)] && deg_[static_cast<std::size_t>(u)] > max_deg) {
+                max_deg = deg_[static_cast<std::size_t>(u)];
+                v = u;
             }
         }
+
+        // Each cover vertex covers at most max_deg edges.
+        const long long edges = edges2_ / 2;
+        if (static_cast<long long>(max_deg) * budget() < edges ||
+            static_cast<int32_t>(cover_.size()) + matching_lower_bound() > limit_) {
+            undo_to(mark);
+            return;
+        }
+
+        std::vector<int32_t> nbrs;
+        nbrs.reserve(static_cast<std::size_t>(max_deg));
+        for (int32_t u : G_[static_cast<std::size_t>(v)]) {
+            if (active_[static_cast<std::size_t>(u)]) nbrs.push_back(u);
+        }
+
+        // Branch A: v is in the cover.
+        {
+            const std::size_t m2 = trail_.size();
+            remove(v, true);
+            search();
+            work_.clear();
+            undo_to(m2);
+        }
+
+        // Branch B: v is not in the cover, so all its neighbors are.
+        if (!done_ && !aborted_ &&
+            static_cast<int32_t>(cover_.size() + nbrs.size()) <= limit_) {
+            const std::size_t m2 = trail_.size();
+            for (int32_t u : nbrs) remove(u, true);
+            search();
+            work_.clear();
+            undo_to(m2);
+        }
+
+        undo_to(mark);
     }
 
-    // ----- Branch A: take v into the cover -----
-    {
-        VCState child = state;
-        if (take_vertex_into_cover(child, v)) {
-            if (solve(child, steps, step_limit, aborted)) {
-                if (!aborted) {
-                    state.cover.swap(child.cover);
-                    return true;
-                } else {
-                    return false;
-                }
-            }
-        }
-        if (aborted) {
-            return false;
-        }
-    }
+    const AdjList& G_;
+    const int32_t n_;
+    std::vector<std::uint8_t> active_;
+    std::vector<int32_t> deg_;       // degree among active vertices
+    std::vector<uint32_t> matched_;  // matching scratch, valid when == stamp_
+    uint32_t stamp_ = 0;
+    long long edges2_ = 0;           // twice the number of active edges
 
-    // ----- Branch B: take all neighbors of v into the cover -----
-    {
-        VCState child = state;
+    std::vector<int32_t> cover_;
+    std::vector<int32_t> trail_;     // v (dropped) or ~v (taken into cover)
+    std::vector<int32_t> work_;
 
-        if (static_cast<int32_t>(neighbors.size()) <= child.k) {
-            if (take_vertices_into_cover(child, neighbors)) {
-                if (solve(child, steps, step_limit, aborted)) {
-                    if (!aborted) {
-                        state.cover.swap(child.cover);
-                        return true;
-                    } else {
-                        return false;
-                    }
-                }
-            }
-        }
-        if (aborted) {
-            return false;
-        }
-    }
-
-    return false;
-}
+    int32_t limit_;
+    const bool stop_at_first_;
+    const long long step_limit_;
+    long long steps_ = 0;
+    bool done_ = false;
+    bool aborted_ = false;
+    bool found_ = false;
+    std::vector<int32_t> best_;
+};
 
 } // anonymous namespace
 
@@ -384,64 +252,40 @@ namespace lazymc {
 
 k_vertex_cover_res k_vertex_cover_adj(const AdjList& G, int32_t k) {
     k_vertex_cover_res result;
+    if (k < 0) return result;
 
-    if (k < 0) {
-        result.found = false;
-        result.aborted = false;
-        return result;
-    }
-
-    const int32_t n = static_cast<int32_t>(G.size());
-
-    // Validate that all adjacency indices are within [0, n).
     if (!validate_graph_indices(G)) {
-        result.found = false;
         result.aborted = true; // Invalid input detected
         return result;
     }
 
-    VCState state;
-    state.G = &G;
-    state.k = k;
-    state.active.assign(static_cast<std::size_t>(n), 1u);
-    state.degree.assign(static_cast<std::size_t>(n), 0);
+    VCSearch search(G, k, /*stop_at_first=*/true, VC_STEP_LIMIT);
+    search.run();
 
-    // Initialize degrees in the original graph.
-    for (int32_t v = 0; v < n; ++v) {
-        const auto& nbrs = G[static_cast<std::size_t>(v)];
-        int32_t deg = 0;
-        for (int32_t u : nbrs) {
-            // After validate_graph_indices, all u are in [0, n),
-            // so we can safely count all neighbors.
-            ++deg;
-        }
-        state.degree[static_cast<std::size_t>(v)] = deg;
-    }
+    result.aborted = search.aborted() && !search.found();
+    result.found = search.found();
+    if (result.found) result.cover = std::move(search.best());
+    return result;
+}
 
-    // Global lower bound on the whole graph before recursion.
-    {
-        int32_t lb = greedy_matching_lower_bound(G, state.active, k);
-        if (lb > state.k) {
-            result.found = false;
-            result.aborted = false;
-            return result;
-        }
-    }
+min_vertex_cover_res min_vertex_cover_adj(const AdjList& G,
+                                          int32_t k_max,
+                                          long long step_limit) {
+    min_vertex_cover_res result;
+    if (k_max < 0) return result;
 
-    long long steps = 0;
-    bool aborted = false;
-
-    const bool ok = solve(state, steps, VC_STEP_LIMIT, aborted);
-
-    result.aborted = aborted;
-
-    if (!ok || aborted) {
-        result.found = false;
+    if (!validate_graph_indices(G)) {
+        result.aborted = true;
         return result;
     }
 
-    result.found = true;
-    result.cover = std::move(state.cover);
+    VCSearch search(G, k_max, /*stop_at_first=*/false, step_limit);
+    search.run();
+
+    result.aborted = search.aborted();
+    result.found = search.found();
+    result.optimal = result.found && !result.aborted;
+    if (result.found) result.cover = std::move(search.best());
     return result;
 }
 
