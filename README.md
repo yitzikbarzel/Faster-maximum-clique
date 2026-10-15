@@ -69,6 +69,43 @@ $G gnp     400 0.99 12                              > gnp400_0.99.txt
 | gnp150_0.9 | 150 | 10,062 | 36 | 0.15 s | 0.53 s |
 | gnp400_0.99 | 400 | 79,054 | 196 | 0.47 s | > 900 s |
 
+### Before / after this change (repository datasets)
+
+LazyMC from `main` (`b7e689b`) compared with this branch, on the graphs in `LazyMC/tests/data` as they were
+on `main`. Both binaries come from the same `bench_cli.cpp`, which checks every returned clique
+(`valid=yes` in all runs). Measured on WSL2 Ubuntu 24.04, 4 cores, GCC 13.3, Release, with a 140 s timeout per run.
+`main` was run three times; the range is given in brackets.
+
+| Graph | Vertices | Edges | Clique | LazyMC `main` | LazyMC this PR | Speedup |
+| ----- | -------- | ----- | ------ | ------------- | -------------- | ------- |
+| vc_sample | 200 | 8,473 | 58 | 63 ms (63–65) | **2.7 ms** | ×23 |
+| hamming8-2 | 256 | 31,616 | 128 | 815 ms (673–1414) | **49 ms** | ×17 |
+| com-youtube | 1,157,828 | 2,987,624 | 17 | 2.89 s (2.85–2.98) | **0.39 s** | ×7.4 |
+| bio-HS-CX | 4,413 | 108,818 | 86 | 173 ms (171–246) | **24 ms** | ×7.3 |
+| roadNet-CA | 1,971,300 | 2,766,607 | 4 | 647 ms (647–849) | **338 ms** | ×1.9 |
+| test_profile | 10 | 15 | 4 | 1.0 ms | 0.7 ms | — |
+| MANN_a81 (`C1000.9.clq`) | 3,321 | 408,849 | — | > 140 s | > 140 s | — |
+| bio-human-gene2 | 14,340 | 9,027,024 | — | > 140 s | > 140 s | — |
+
+The same runs against PMC:
+
+| Graph | LazyMC this PR | PMC | Faster |
+| ----- | -------------- | --- | ------ |
+| com-youtube | 0.39 s | 3.82 s | LazyMC ×9.8 |
+| roadNet-CA | 338 ms | 2,022 ms | LazyMC ×6.0 |
+| bio-HS-CX | 24 ms | 95 ms | LazyMC ×4.0 |
+| vc_sample | 2.7 ms | 8.7 ms | LazyMC ×3.2 |
+| hamming8-2 | 49 ms | 16 ms | PMC ×3.0 |
+
+On `main`, PMC was faster than LazyMC on vc_sample, hamming8-2 and bio-HS-CX. MANN_a81 and bio-human-gene2
+time out for PMC as well.
+
+Notes on the inputs:
+- `com-youtube.ungraph.txt` declares `n = 1157827` in its header, but its largest vertex id is 1157827, so
+  `bench_cli` rejects it. It was run with the header corrected to `1157828`.
+- `sanr400_0.7.clq` on `main` actually contains hamming8-2 and `C1000.9.clq` contains MANN_a81.
+  `C2000.9.clq` and `c-fat200-5.clq` are HTML error pages and were skipped.
+
 ---
 
 ## Algorithm Pipeline
