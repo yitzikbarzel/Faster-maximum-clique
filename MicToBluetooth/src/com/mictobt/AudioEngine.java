@@ -47,7 +47,6 @@ public class AudioEngine {
     private boolean commDeviceSet = false;
     private int savedAudioMode = AudioManager.MODE_NORMAL;
     private BroadcastReceiver scoReceiver;
-    private int routeFixAttempts = 0;
     private volatile int scoState = AudioManager.SCO_AUDIO_STATE_DISCONNECTED;
 
     public AudioEngine(Context ctx, Listener listener) {
@@ -118,7 +117,6 @@ public class AudioEngine {
     public synchronized void start(final int mode) {
         if (running) return;
         this.mode = mode;
-        routeFixAttempts = 0;
         running = true;
         worker = new Thread(new Runnable() {
             @Override
@@ -126,7 +124,8 @@ public class AudioEngine {
                 try {
                     loop();
                 } catch (Throwable t) {
-                    listener.onStatus("אוי דוב'לה, משהו השתבש: " + t.getMessage());
+                    String msg = t.getMessage();
+                    listener.onStatus(msg != null && msg.startsWith("דוב'לה") ? msg : "אוי דוב'לה, משהו השתבש: " + msg);
                 } finally {
                     releaseRouting();
                     running = false;
@@ -152,6 +151,9 @@ public class AudioEngine {
     }
 
     private void setupCallRouting() throws InterruptedException {
+        if (Build.VERSION.SDK_INT >= 31 && findCommDevice() == null) {
+            throw new IllegalStateException("דוב'לה, ההתקן לא מאפשר ערוץ שיחה.\nבדוק בהגדרות ← בלוטוס ← ⚙ ליד ההתקן, ש\"שיחות טלפון\" מופעל,\nושאישרת לאפליקציה הרשאת \"מכשירים בקרבת מקום\".\nאם ההתקן בלי מיקרופון – יש לו רק ערוץ מוזיקה.");
+        }
         savedAudioMode = am.getMode();
         am.setMode(AudioManager.MODE_IN_COMMUNICATION);
 
@@ -184,8 +186,8 @@ public class AudioEngine {
                     && System.currentTimeMillis() < deadline) {
                 Thread.sleep(100);
             }
-            if (scoState != AudioManager.SCO_AUDIO_STATE_CONNECTED) {
-                listener.onStatus("דוב'לה, החיבור לערוץ השיחה לא אושר – מנסה בכל זאת");
+            if (scoState != AudioManager.SCO_AUDIO_STATE_CONNECTED && !isCommDeviceBt()) {
+                throw new IllegalStateException("דוב'לה, ההתקן לא מאפשר ערוץ שיחה.\nבדוק בהגדרות ← בלוטוס ← ⚙ ליד ההתקן, ש\"שיחות טלפון\" מופעל,\nושאישרת לאפליקציה הרשאת \"מכשירים בקרבת מקום\".\nאם ההתקן בלי מיקרופון – יש לו רק ערוץ מוזיקה.");
             }
         }
         Thread.sleep(300); // let the SCO audio link settle
@@ -274,6 +276,9 @@ public class AudioEngine {
         final int rate = call ? 16000 : 48000;
         final int framesPerChunk = call ? rate / 100 : rate / 200; // 10ms / 5ms chunks
 
+        if (!call && findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26, 27) == null) {
+            throw new IllegalStateException("דוב'לה, לא מצאתי בלוטוס מחובר לערוץ מוזיקה");
+        }
         if (call) setupCallRouting();
         if (!running) return;
 
@@ -319,10 +324,10 @@ public class AudioEngine {
         // Always capture from the phone's own microphone (not the headset mic).
         AudioDeviceInfo mic = builtinMic();
         if (mic != null) rec.setPreferredDevice(mic);
-        if (!call) {
-            AudioDeviceInfo out = findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26, 27);
-            if (out != null) track.setPreferredDevice(out);
-        }
+        AudioDeviceInfo out = call
+                ? findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, 26)
+                : findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26, 27);
+        if (out != null) track.setPreferredDevice(out);
 
         AcousticEchoCanceler aec = null;
         NoiseSuppressor ns = null;
@@ -350,29 +355,43 @@ public class AudioEngine {
             int levelCounter = 0;
             int peak = 0;
             int chunks = 0;
-            boolean routeChecked = false;
-            final int checkAfter = rate / framesPerChunk / 2; // ~0.5s
+            final int checkEvery = rate / framesPerChunk / 4; // ~250ms
+            boolean onBt = false;
+            int offBtChecks = 0;
+            String lastStatus = "";
             while (running) {
-                if (!routeChecked && ++chunks >= checkAfter) {
-                    routeChecked = true;
+                if (++chunks >= checkEvery) {
+                    chunks = 0;
                     AudioDeviceInfo r = routedDevice(track);
-                    if (r != null && !isBt(r.getType())) {
+                    onBt = r != null && isBt(r.getType());
+                    String st;
+                    if (onBt) {
+                        offBtChecks = 0;
+                        st = (call ? "דוב'לה, אתה באוויר! ערוץ שיחה (" : "דוב'לה, אתה באוויר! ערוץ מוזיקה (")
+                                + rate / 1000 + "kHz)\nהקול יוצא ב: " + deviceName(r);
+                    } else {
+                        offBtChecks++;
+                        st = "מושתק – מחכה שהקול יעבור לבלוטוס...\n(כרגע: " + deviceName(r) + ")";
                         AudioDeviceInfo bt = call
                                 ? findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, 26)
                                 : findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26, 27);
-                        if (bt != null) track.setPreferredDevice(bt);
-                        if (call && !scoStartedLegacy) { // last resort: legacy SCO
+                        if (bt != null && offBtChecks % 4 == 1) track.setPreferredDevice(bt);
+                        if (call && !scoStartedLegacy && offBtChecks == 4) { // last resort: legacy SCO
                             if (scoReceiver == null) registerScoReceiver();
                             am.startBluetoothSco();
                             am.setBluetoothScoOn(true);
                             scoStartedLegacy = true;
                         }
-                        chunks = 0;
-                        routeChecked = false;
-                        if (++routeFixAttempts > 3) routeChecked = true;
+                        if (offBtChecks >= 24) { // ~6 seconds without Bluetooth
+                            throw new IllegalStateException(call
+                                    ? "דוב'לה, ההתקן לא מאפשר ערוץ שיחה.\nבדוק בהגדרות ← בלוטוס ← ⚙ ליד ההתקן, ש\"שיחות טלפון\" מופעל,\nושאישרת לאפליקציה הרשאת \"מכשירים בקרבת מקום\".\nאם ההתקן בלי מיקרופון – יש לו רק ערוץ מוזיקה."
+                                    : "דוב'לה, הבלוטוס התנתק או לא זמין");
+                        }
                     }
-                    listener.onStatus((call ? "דוב'לה, אתה באוויר! (ערוץ שיחה)" : "דוב'לה, אתה באוויר! (ערוץ מוזיקה)")
-                            + "\nהקול יוצא ב: " + deviceName(routedDevice(track)));
+                    if (!st.equals(lastStatus)) {
+                        listener.onStatus(st);
+                        lastStatus = st;
+                    }
                 }
                 int n = rec.read(buf, 0, buf.length);
                 if (n <= 0) continue;
@@ -381,7 +400,7 @@ public class AudioEngine {
                     int v = (int) (buf[i] * g);
                     if (v > 32767) v = 32767;
                     else if (v < -32768) v = -32768;
-                    buf[i] = (short) v;
+                    buf[i] = onBt ? (short) v : 0; // never play out of the phone itself
                     int a = v < 0 ? -v : v;
                     if (a > peak) peak = a;
                 }
