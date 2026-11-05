@@ -47,6 +47,7 @@ public class AudioEngine {
     private boolean commDeviceSet = false;
     private int savedAudioMode = AudioManager.MODE_NORMAL;
     private BroadcastReceiver scoReceiver;
+    private int routeFixAttempts = 0;
     private volatile int scoState = AudioManager.SCO_AUDIO_STATE_DISCONNECTED;
 
     public AudioEngine(Context ctx, Listener listener) {
@@ -117,6 +118,7 @@ public class AudioEngine {
     public synchronized void start(final int mode) {
         if (running) return;
         this.mode = mode;
+        routeFixAttempts = 0;
         running = true;
         worker = new Thread(new Runnable() {
             @Override
@@ -163,6 +165,13 @@ public class AudioEngine {
                 }
             }
         }
+        if (commDeviceSet) {
+            long deadline = System.currentTimeMillis() + 3000;
+            while (running && !isCommDeviceBt() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(100);
+            }
+            if (!isCommDeviceBt()) commDeviceSet = false; // fall back to legacy SCO below
+        }
         if (!commDeviceSet) {
             // Legacy path (also works on Android 13, deprecated)
             registerScoReceiver();
@@ -178,8 +187,44 @@ public class AudioEngine {
             if (scoState != AudioManager.SCO_AUDIO_STATE_CONNECTED) {
                 listener.onStatus("אזהרה: לא אושר חיבור SCO, ממשיך בכל זאת");
             }
-        } else {
-            Thread.sleep(400); // give the SCO link a moment to come up
+        }
+        Thread.sleep(300); // let the SCO audio link settle
+    }
+
+    /** API 31+: is AudioManager.getCommunicationDevice() a Bluetooth device? */
+    private boolean isCommDeviceBt() {
+        try {
+            Method m = AudioManager.class.getMethod("getCommunicationDevice");
+            AudioDeviceInfo d = (AudioDeviceInfo) m.invoke(am);
+            return d != null && isBt(d.getType());
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean isBt(int type) {
+        return type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                || type == 26 || type == 27;
+    }
+
+    /** API 24+: AudioTrack.getRoutedDevice(), via reflection. */
+    private static AudioDeviceInfo routedDevice(AudioTrack t) {
+        try {
+            return (AudioDeviceInfo) AudioTrack.class.getMethod("getRoutedDevice").invoke(t);
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    private static String deviceName(AudioDeviceInfo d) {
+        if (d == null) return "לא ידוע";
+        switch (d.getType()) {
+            case AudioDeviceInfo.TYPE_BLUETOOTH_SCO: return "בלוטוס (שיחה)";
+            case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP: return "בלוטוס (מוזיקה)";
+            case 26: case 27: return "בלוטוס LE";
+            case AudioDeviceInfo.TYPE_BUILTIN_SPEAKER: return "רמקול הטלפון";
+            case AudioDeviceInfo.TYPE_BUILTIN_EARPIECE: return "אפרכסת הטלפון";
+            default: return "התקן " + d.getType();
         }
     }
 
@@ -236,7 +281,7 @@ public class AudioEngine {
         int minPlay = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
 
         AudioRecord rec = new AudioRecord.Builder()
-                .setAudioSource(call ? MediaRecorder.AudioSource.VOICE_COMMUNICATION : MediaRecorder.AudioSource.MIC)
+                .setAudioSource(MediaRecorder.AudioSource.MIC)
                 .setAudioFormat(new AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .setSampleRate(rate)
@@ -274,10 +319,10 @@ public class AudioEngine {
         // Always capture from the phone's own microphone (not the headset mic).
         AudioDeviceInfo mic = builtinMic();
         if (mic != null) rec.setPreferredDevice(mic);
-        AudioDeviceInfo out = call
-                ? findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
-                : findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26, 27);
-        if (out != null) track.setPreferredDevice(out);
+        if (!call) {
+            AudioDeviceInfo out = findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26, 27);
+            if (out != null) track.setPreferredDevice(out);
+        }
 
         AcousticEchoCanceler aec = null;
         NoiseSuppressor ns = null;
@@ -304,7 +349,31 @@ public class AudioEngine {
                     : "פעיל – ערוץ מוזיקה (איכות גבוהה, " + rate / 1000 + "kHz)");
             int levelCounter = 0;
             int peak = 0;
+            int chunks = 0;
+            boolean routeChecked = false;
+            final int checkAfter = rate / framesPerChunk / 2; // ~0.5s
             while (running) {
+                if (!routeChecked && ++chunks >= checkAfter) {
+                    routeChecked = true;
+                    AudioDeviceInfo r = routedDevice(track);
+                    if (r != null && !isBt(r.getType())) {
+                        AudioDeviceInfo bt = call
+                                ? findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, 26)
+                                : findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26, 27);
+                        if (bt != null) track.setPreferredDevice(bt);
+                        if (call && !scoStartedLegacy) { // last resort: legacy SCO
+                            if (scoReceiver == null) registerScoReceiver();
+                            am.startBluetoothSco();
+                            am.setBluetoothScoOn(true);
+                            scoStartedLegacy = true;
+                        }
+                        chunks = 0;
+                        routeChecked = false;
+                        if (++routeFixAttempts > 3) routeChecked = true;
+                    }
+                    listener.onStatus((call ? "פעיל – ערוץ שיחה" : "פעיל – ערוץ מוזיקה")
+                            + "\nיציאה: " + deviceName(routedDevice(track)));
+                }
                 int n = rec.read(buf, 0, buf.length);
                 if (n <= 0) continue;
                 float g = gain;
