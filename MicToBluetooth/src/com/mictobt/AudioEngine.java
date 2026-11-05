@@ -193,6 +193,44 @@ public class AudioEngine {
         Thread.sleep(300); // let the SCO audio link settle
     }
 
+    private int nativeRate() {
+        try {
+            int r = Integer.parseInt(am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE));
+            if (r >= 16000 && r <= 96000) return r;
+        } catch (Throwable ignored) {
+        }
+        return 48000;
+    }
+
+    private int nativeBurst(int rate) {
+        try {
+            int f = Integer.parseInt(am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER));
+            if (f >= 32 && f <= rate / 50) return f;
+        } catch (Throwable ignored) {
+        }
+        return rate / 200; // 5ms
+    }
+
+    /** UNPROCESSED (API 24, value 9) if supported, else VOICE_RECOGNITION – both skip most DSP. */
+    private int lowLatencySource() {
+        try {
+            if ("true".equals(am.getProperty("android.media.property.SUPPORT_AUDIO_SOURCE_UNPROCESSED"))) {
+                return 9;
+            }
+        } catch (Throwable ignored) {
+        }
+        return MediaRecorder.AudioSource.VOICE_RECOGNITION;
+    }
+
+    private static int callInt(Object o, String name, Integer arg) {
+        try {
+            if (arg == null) return (Integer) o.getClass().getMethod(name).invoke(o);
+            return (Integer) o.getClass().getMethod(name, int.class).invoke(o, arg);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
     /** API 31+: is AudioManager.getCommunicationDevice() a Bluetooth device? */
     private boolean isCommDeviceBt() {
         try {
@@ -273,8 +311,9 @@ public class AudioEngine {
 
     private void loop() throws Exception {
         final boolean call = mode == MODE_CALL;
-        final int rate = call ? 16000 : 48000;
-        final int framesPerChunk = call ? rate / 100 : rate / 200; // 10ms / 5ms chunks
+        final int rate = call ? 16000 : nativeRate();
+        final int burst = call ? rate / 100 : nativeBurst(rate);
+        final int framesPerChunk = burst;
 
         if (!call && findOutput(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26, 27) == null) {
             throw new IllegalStateException("דוב'לה, לא מצאתי בלוטוס מחובר לערוץ מוזיקה");
@@ -286,13 +325,13 @@ public class AudioEngine {
         int minPlay = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
 
         AudioRecord rec = new AudioRecord.Builder()
-                .setAudioSource(MediaRecorder.AudioSource.MIC)
+                .setAudioSource(call ? MediaRecorder.AudioSource.MIC : lowLatencySource())
                 .setAudioFormat(new AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .setSampleRate(rate)
                         .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                         .build())
-                .setBufferSizeInBytes(Math.max(minRec, framesPerChunk * 2 * 4))
+                .setBufferSizeInBytes(Math.max(minRec, framesPerChunk * 2 * 2))
                 .build();
 
         AudioAttributes attrs = new AudioAttributes.Builder()
@@ -306,7 +345,7 @@ public class AudioEngine {
                         .setSampleRate(rate)
                         .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                         .build())
-                .setBufferSizeInBytes(Math.max(minPlay, framesPerChunk * 2 * 2))
+                .setBufferSizeInBytes(Math.max(minPlay, framesPerChunk * 2 * 4))
                 .setTransferMode(AudioTrack.MODE_STREAM);
         try { // API 26+: AudioTrack.Builder.setPerformanceMode(PERFORMANCE_MODE_LOW_LATENCY = 1)
             Method pm = AudioTrack.Builder.class.getMethod("setPerformanceMode", int.class);
@@ -354,6 +393,9 @@ public class AudioEngine {
                     : "דוב'לה, אתה באוויר! ערוץ מוזיקה (" + rate / 1000 + "kHz)");
             int levelCounter = 0;
             int peak = 0;
+            int bufFrames = callInt(track, "setBufferSizeInFrames", burst * 2);
+            final int maxFrames = callInt(track, "getBufferCapacityInFrames", null);
+            int lastUnderruns = callInt(track, "getUnderrunCount", null);
             int chunks = 0;
             final int checkEvery = rate / framesPerChunk / 4; // ~250ms
             boolean onBt = false;
@@ -362,13 +404,19 @@ public class AudioEngine {
             while (running) {
                 if (++chunks >= checkEvery) {
                     chunks = 0;
+                    int u = callInt(track, "getUnderrunCount", null);
+                    if (u > lastUnderruns && bufFrames > 0 && (maxFrames <= 0 || bufFrames < maxFrames)) {
+                        bufFrames = callInt(track, "setBufferSizeInFrames", bufFrames + burst);
+                    }
+                    lastUnderruns = u;
                     AudioDeviceInfo r = routedDevice(track);
                     onBt = r != null && isBt(r.getType());
                     String st;
                     if (onBt) {
                         offBtChecks = 0;
                         st = (call ? "דוב'לה, אתה באוויר! ערוץ שיחה (" : "דוב'לה, אתה באוויר! ערוץ מוזיקה (")
-                                + rate / 1000 + "kHz)\nהקול יוצא ב: " + deviceName(r);
+                                + rate / 1000 + "kHz)\nהקול יוצא ב: " + deviceName(r)
+                                + (bufFrames > 0 ? "\nבאפר: " + (bufFrames * 1000 / rate) + "ms" : "");
                     } else {
                         offBtChecks++;
                         st = "מושתק – מחכה שהקול יעבור לבלוטוס...\n(כרגע: " + deviceName(r) + ")";
