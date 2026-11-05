@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.mictobt"
-    android:versionCode="2"
-    android:versionName="1.1">
+    android:versionCode="3"
+    android:versionName="1.2">
 
     <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="33" />
 
@@ -12,7 +12,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <application
-        android:label="מיקרופון לבלוטוס"
+        android:label="המיקרופון של דוב'לה"
         android:icon="@drawable/ic_launcher"
         android:allowBackup="false"
         android:theme="@android:style/Theme.Material.Light.DarkActionBar">

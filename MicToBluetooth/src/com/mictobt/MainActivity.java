@@ -57,7 +57,7 @@ public class MainActivity extends Activity implements AudioEngine.Listener {
         root.setPadding(dp(20), dp(20), dp(20), dp(20));
 
         TextView title = new TextView(this);
-        title.setText("מיקרופון ← בלוטוס");
+        title.setText("שלום דוב'לה! 👋");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
@@ -70,7 +70,7 @@ public class MainActivity extends Activity implements AudioEngine.Listener {
         root.addView(tvBt);
 
         TextView modeLabel = new TextView(this);
-        modeLabel.setText("בחר ערוץ:");
+        modeLabel.setText("דוב'לה, באיזה ערוץ נשדר?");
         modeLabel.setTextSize(18);
         modeLabel.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(modeLabel);
@@ -78,12 +78,12 @@ public class MainActivity extends Activity implements AudioEngine.Listener {
         RadioGroup rg = new RadioGroup(this);
         rbCall = new RadioButton(this);
         rbCall.setId(View.generateViewId());
-        rbCall.setText("ערוץ שיחה (SCO) – השהיה נמוכה, איכות טלפונית");
+        rbCall.setText("ערוץ שיחה – בלי השהיה, כשדוב'לה מדבר בזמן אמת");
         rbCall.setTextSize(16);
         rbCall.setPadding(dp(8), dp(12), dp(8), dp(12));
         rbMedia = new RadioButton(this);
         rbMedia.setId(View.generateViewId());
-        rbMedia.setText("ערוץ מוזיקה (A2DP) – איכות גבוהה, השהיה גבוהה יותר");
+        rbMedia.setText("ערוץ מוזיקה – הכי איכותי, עם השהיה קטנה");
         rbMedia.setTextSize(16);
         rbMedia.setPadding(dp(8), dp(12), dp(8), dp(12));
         rg.addView(rbCall);
@@ -121,7 +121,7 @@ public class MainActivity extends Activity implements AudioEngine.Listener {
         root.addView(sb);
 
         TextView lvlLabel = new TextView(this);
-        lvlLabel.setText("עוצמת קלט:");
+        lvlLabel.setText("כמה חזק דוב'לה מדבר:");
         lvlLabel.setPadding(0, dp(16), 0, dp(4));
         root.addView(lvlLabel);
         level = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -151,14 +151,14 @@ public class MainActivity extends Activity implements AudioEngine.Listener {
         tvStatus.setTextSize(15);
         tvStatus.setGravity(Gravity.CENTER);
         tvStatus.setPadding(0, dp(16), 0, 0);
-        tvStatus.setText("מוכן");
+        tvStatus.setText("הכול מוכן בשבילך, דוב'לה");
         root.addView(tvStatus);
 
         TextView hint = new TextView(this);
         hint.setTextSize(13);
         hint.setTextColor(Color.GRAY);
         hint.setPadding(0, dp(24), 0, 0);
-        hint.setText("טיפ: כדי למנוע צפצוף (פידבק), הרחק את הטלפון מהרמקול.\n"
+        hint.setText("טיפ לדוב'לה: אם יש צפצוף, תרחיק קצת את הטלפון מהרמקול.\n"
                 + "המסך יישאר דלוק כל עוד האפליקציה פתוחה.");
         root.addView(hint);
 
@@ -168,12 +168,12 @@ public class MainActivity extends Activity implements AudioEngine.Listener {
     }
 
     private void setGainText(int p) {
-        tvGain.setText("הגברה: " + (p * 10) + "%");
+        tvGain.setText("הגברת הקול של דוב'לה: " + (p * 10) + "%");
     }
 
     private void updateButton() {
         boolean on = engine.isRunning();
-        btnToggle.setText(on ? "עצור" : "התחל");
+        btnToggle.setText(on ? "דוב'לה, לעצור" : "דוב'לה, מתחילים!");
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(dp(16));
         bg.setColor(on ? Color.parseColor("#C62828") : Color.parseColor("#2E7D32"));
@@ -184,10 +184,10 @@ public class MainActivity extends Activity implements AudioEngine.Listener {
         boolean a2dp = engine.hasA2dp();
         boolean sco = engine.hasSco();
         if (!a2dp && !sco) {
-            tvBt.setText("⚠ לא זוהה התקן בלוטוס מחובר");
+            tvBt.setText("⚠ דוב'לה, לא מצאתי בלוטוס מחובר – תחבר רמקול או אוזניות");
             tvBt.setTextColor(Color.parseColor("#C62828"));
         } else {
-            tvBt.setText("בלוטוס מחובר ✓  (מוזיקה: " + (a2dp ? "כן" : "לא") + " | שיחה: " + (sco ? "כן" : "לא") + ")");
+            tvBt.setText("דוב'לה, הבלוטוס מחובר ✓  (מוזיקה: " + (a2dp ? "כן" : "לא") + " | שיחה: " + (sco ? "כן" : "לא") + ")");
             tvBt.setTextColor(Color.parseColor("#2E7D32"));
         }
     }
@@ -219,7 +219,7 @@ public class MainActivity extends Activity implements AudioEngine.Listener {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startEngine();
         } else {
-            tvStatus.setText("נדרשת הרשאת מיקרופון");
+            tvStatus.setText("דוב'לה, צריך לאשר את המיקרופון כדי שאשמע אותך");
         }
     }
 

@@ -126,7 +126,7 @@ public class AudioEngine {
                 try {
                     loop();
                 } catch (Throwable t) {
-                    listener.onStatus("שגיאה: " + t.getMessage());
+                    listener.onStatus("אוי דוב'לה, משהו השתבש: " + t.getMessage());
                 } finally {
                     releaseRouting();
                     running = false;
@@ -178,14 +178,14 @@ public class AudioEngine {
             am.startBluetoothSco();
             am.setBluetoothScoOn(true);
             scoStartedLegacy = true;
-            listener.onStatus("מתחבר לבלוטוס (ערוץ שיחה)...");
+            listener.onStatus("רגע דוב'לה, מתחבר לבלוטוס...");
             long deadline = System.currentTimeMillis() + 5000;
             while (running && scoState != AudioManager.SCO_AUDIO_STATE_CONNECTED
                     && System.currentTimeMillis() < deadline) {
                 Thread.sleep(100);
             }
             if (scoState != AudioManager.SCO_AUDIO_STATE_CONNECTED) {
-                listener.onStatus("אזהרה: לא אושר חיבור SCO, ממשיך בכל זאת");
+                listener.onStatus("דוב'לה, החיבור לערוץ השיחה לא אושר – מנסה בכל זאת");
             }
         }
         Thread.sleep(300); // let the SCO audio link settle
@@ -313,7 +313,7 @@ public class AudioEngine {
         if (rec.getState() != AudioRecord.STATE_INITIALIZED || track.getState() != AudioTrack.STATE_INITIALIZED) {
             rec.release();
             track.release();
-            throw new IllegalStateException("לא ניתן לפתוח את המיקרופון / הרמקול");
+            throw new IllegalStateException("לא הצלחתי לפתוח את המיקרופון או הרמקול");
         }
 
         // Always capture from the phone's own microphone (not the headset mic).
@@ -345,8 +345,8 @@ public class AudioEngine {
             rec.startRecording();
             track.play();
             listener.onStatus(call
-                    ? "פעיל – ערוץ שיחה (השהיה נמוכה, " + rate / 1000 + "kHz)"
-                    : "פעיל – ערוץ מוזיקה (איכות גבוהה, " + rate / 1000 + "kHz)");
+                    ? "דוב'לה, אתה באוויר! ערוץ שיחה (" + rate / 1000 + "kHz)"
+                    : "דוב'לה, אתה באוויר! ערוץ מוזיקה (" + rate / 1000 + "kHz)");
             int levelCounter = 0;
             int peak = 0;
             int chunks = 0;
@@ -371,8 +371,8 @@ public class AudioEngine {
                         routeChecked = false;
                         if (++routeFixAttempts > 3) routeChecked = true;
                     }
-                    listener.onStatus((call ? "פעיל – ערוץ שיחה" : "פעיל – ערוץ מוזיקה")
-                            + "\nיציאה: " + deviceName(routedDevice(track)));
+                    listener.onStatus((call ? "דוב'לה, אתה באוויר! (ערוץ שיחה)" : "דוב'לה, אתה באוויר! (ערוץ מוזיקה)")
+                            + "\nהקול יוצא ב: " + deviceName(routedDevice(track)));
                 }
                 int n = rec.read(buf, 0, buf.length);
                 if (n <= 0) continue;
@@ -399,7 +399,7 @@ public class AudioEngine {
             track.release();
             if (aec != null) aec.release();
             if (ns != null) ns.release();
-            listener.onStatus("נעצר");
+            listener.onStatus("עצרנו. מחכה לך, דוב'לה");
         }
     }
 }
